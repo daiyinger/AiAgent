@@ -1,0 +1,51 @@
+package com.example.aiagent.tools
+
+import com.intellij.openapi.project.Project
+
+object ToolManager {
+    private val tools = mutableMapOf<String, Tool>()
+
+    init {
+        registerTools()
+    }
+
+    private fun registerTools() {
+        registerTool(ReadFileTool())
+        registerTool(EditFileTool())
+        registerTool(BuildTool())
+        registerTool(SearchFilesTool())
+        registerTool(ListFilesTool())
+        registerTool(AndroidProjectAnalysisTool())
+    }
+
+    private fun registerTool(tool: Tool) {
+        tools[tool.name] = tool
+    }
+
+    fun getTool(name: String): Tool? = tools[name]
+
+    fun getAllTools(): List<Tool> = tools.values.toList()
+
+    fun getToolDefinitions(): String {
+        return tools.values.joinToString("\n") { tool ->
+            """
+            |Tool: ${tool.name}
+            |Description: ${tool.description}
+            |Parameters:
+            |${tool.parameters.joinToString("\n") { param ->
+                "  - ${param.name} (${param.type}): ${param.description}${if (param.required) " (required)" else " (optional)"}"
+            }}
+            """.trimMargin()
+        }
+    }
+
+    suspend fun executeTool(project: Project, toolName: String, params: Map<String, Any>): ToolResult {
+        val tool = getTool(toolName) ?: return ToolResult.Error("Tool '$toolName' not found")
+        
+        return try {
+            tool.execute(project, params)
+        } catch (e: Exception) {
+            ToolResult.Error("Error executing tool '$toolName': ${e.message}")
+        }
+    }
+}
