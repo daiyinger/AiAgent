@@ -452,6 +452,35 @@ fun ChatPanel() {
                                             onTokenUsage = { inputTokens, outputTokens ->
                                                 tokenUsage = Pair(inputTokens, outputTokens)
                                                 log("Token使用情况: 输入=$inputTokens, 输出=$outputTokens")
+                                                
+                                                // 更新最后一条 AI 消息的 token 统计信息
+                                                CoroutineScope(Dispatchers.Main).launch {
+                                                    val newMessages = messages.value.toMutableList()
+                                                    val aiMessageIndex = newMessages.indexOfLast { it is AiMessage }
+                                                    if (aiMessageIndex >= 0) {
+                                                        val aiMessage = newMessages[aiMessageIndex] as AiMessage
+                                                        val updatedAiMessage = AiMessage(
+                                                            id = aiMessage.id,
+                                                            content = aiMessage.content,
+                                                            timestamp = aiMessage.timestamp,
+                                                            isGenerating = aiMessage.isGenerating,
+                                                            tokenUsage = Pair(inputTokens, outputTokens)
+                                                        )
+                                                        newMessages[aiMessageIndex] = updatedAiMessage
+                                                        messages.value = newMessages
+                                                        
+                                                        // 更新 ChatStateService 中的 token 统计信息
+                                                        val currentSession = chatStateService.currentSession
+                                                        if (currentSession != null) {
+                                                            val aiMessageState = currentSession.messages.lastOrNull { it.type == "ai" }
+                                                            if (aiMessageState != null) {
+                                                                aiMessageState.inputTokens = inputTokens
+                                                                aiMessageState.outputTokens = outputTokens
+                                                                aiMessageState.totalTokens = inputTokens + outputTokens
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             },
                                             onToolOutput = { toolName, output ->
                                                 if (!isSending) return@sendMessage
@@ -506,6 +535,17 @@ fun ChatPanel() {
                                                 
                                                 chatStateService.updateLastAiMessageContent(currentContent)
                                                 chatStateService.setLastAiMessageGenerating(false)
+                                                
+                                                // 更新 ChatStateService 中的 token 统计信息
+                                                val currentSession = chatStateService.currentSession
+                                                if (currentSession != null) {
+                                                    val aiMessageState = currentSession.messages.lastOrNull { it.type == "ai" }
+                                                    if (aiMessageState != null && tokenUsage != null) {
+                                                        aiMessageState.inputTokens = tokenUsage.first
+                                                        aiMessageState.outputTokens = tokenUsage.second
+                                                        aiMessageState.totalTokens = tokenUsage.first + tokenUsage.second
+                                                    }
+                                                }
                                             }
                                             
                                             // 不再创建单独的 TokenUsageMessage，而是在 AI 消息末尾添加 token 统计

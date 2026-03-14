@@ -130,16 +130,18 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
     }
     
     fun updateLastAiMessageContent(content: String) {
-        val lastMessage = currentSession?.messages?.lastOrNull()
-        if (lastMessage != null && lastMessage.type == "ai") {
-            lastMessage.content = content
+        // 查找最后一条 AI 消息，而不是最后一条消息
+        val lastAiMessage = currentSession?.messages?.lastOrNull { it.type == "ai" }
+        if (lastAiMessage != null) {
+            lastAiMessage.content = content
         }
     }
     
     fun setLastAiMessageGenerating(isGenerating: Boolean) {
-        val lastMessage = currentSession?.messages?.lastOrNull()
-        if (lastMessage != null && lastMessage.type == "ai") {
-            lastMessage.isGenerating = isGenerating
+        // 查找最后一条 AI 消息，而不是最后一条消息
+        val lastAiMessage = currentSession?.messages?.lastOrNull { it.type == "ai" }
+        if (lastAiMessage != null) {
+            lastAiMessage.isGenerating = isGenerating
         }
     }
     
