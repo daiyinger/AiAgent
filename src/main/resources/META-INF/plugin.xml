@@ -31,5 +31,7 @@
         <toolWindow id="MyToolWindow" factoryClass="com.example.aiagent.MyToolWindowFactory"
                     anchor="right" icon="AllIcons.Toolwindows.ToolWindowPalette"/>
         <applicationService serviceImplementation="com.example.aiagent.settings.AiAgentSettings"/>
+        <applicationService serviceImplementation="com.example.aiagent.service.ChatStateService"/>
+        <applicationService serviceImplementation="com.example.aiagent.service.LogService"/>
     </extensions>
 </idea-plugin>

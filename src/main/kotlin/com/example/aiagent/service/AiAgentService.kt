@@ -13,11 +13,6 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import com.intellij.openapi.application.ApplicationManager
-import java.io.File
-import java.io.FileWriter
-import java.io.BufferedWriter
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 class AiAgentService {
     
@@ -25,26 +20,20 @@ class AiAgentService {
         .connectTimeout(Duration.ofSeconds(30))
         .build()
     
-    // 日志文件路径
-    private val logFile = File("C:\\AiAgent\\logs", "ai_agent.log")
-    
-    init {
-        // 创建日志目录
-        logFile.parentFile?.mkdirs()
+    private fun log(message: String) {
+        LogService.log(message)
     }
     
-    // 记录日志
-    private fun log(message: String) {
-        try {
-            val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
-            val timestamp = LocalDateTime.now().format(formatter)
-            val logMessage = "[$timestamp] $message\n"
-            
-            BufferedWriter(FileWriter(logFile, true)).use { writer ->
-                writer.write(logMessage)
+    private fun buildApiUrl(provider: AiAgentSettings.Provider, endpoint: String): String {
+        val baseUrl = provider.apiUrl.trimEnd('/')
+        return when (provider.apiType) {
+            "ollama" -> {
+                if (baseUrl.contains("/api/")) baseUrl else "$baseUrl$endpoint"
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+            "openai" -> {
+                if (baseUrl.contains("/v1/")) baseUrl else "$baseUrl$endpoint"
+            }
+            else -> "$baseUrl$endpoint"
         }
     }
     
@@ -254,11 +243,11 @@ class AiAgentService {
             val settings = AiAgentSettings.instance.state
             val currentProvider = settings.providers.find { it.id == settings.currentProviderId } ?: settings.providers[0]
             
-            val apiUrl = when (currentProvider.apiType) {
-                "ollama" -> "http://${currentProvider.apiHost}:${currentProvider.apiPort}/api/generate"
-                "openai" -> "${currentProvider.apiHost}/v1/chat/completions"
-                else -> "http://${currentProvider.apiHost}:${currentProvider.apiPort}/api/generate"
-            }
+            val apiUrl = buildApiUrl(currentProvider, when (currentProvider.apiType) {
+                "ollama" -> "/api/generate"
+                "openai" -> "/v1/chat/completions"
+                else -> "/api/generate"
+            })
             
             // 构建包含工具定义的提示
             val promptWithTools = buildPromptWithTools(message)
@@ -332,11 +321,11 @@ class AiAgentService {
             log("当前Provider: ${currentProvider.name}, 类型: ${currentProvider.apiType}")
             log("当前模型: ${settings.currentModel}")
             
-            val apiUrl = when (currentProvider.apiType) {
-                "ollama" -> "http://${currentProvider.apiHost}:${currentProvider.apiPort}/api/generate"
-                "openai" -> "${currentProvider.apiHost}/v1/chat/completions"
-                else -> "http://${currentProvider.apiHost}:${currentProvider.apiPort}/api/generate"
-            }
+            val apiUrl = buildApiUrl(currentProvider, when (currentProvider.apiType) {
+                "ollama" -> "/api/generate"
+                "openai" -> "/v1/chat/completions"
+                else -> "/api/generate"
+            })
             
             log("API URL: $apiUrl")
             
@@ -561,18 +550,17 @@ class AiAgentService {
             val settings = AiAgentSettings.instance.state
             val testProvider = provider ?: settings.providers.find { it.id == settings.currentProviderId } ?: settings.providers[0]
             
-            val apiUrl = when (testProvider.apiType) {
-                "ollama" -> "http://${testProvider.apiHost}:${testProvider.apiPort}/api/tags"
-                "openai" -> "${testProvider.apiHost}/v1/models"
-                else -> "http://${testProvider.apiHost}:${testProvider.apiPort}/api/tags"
-            }
+            val apiUrl = buildApiUrl(testProvider, when (testProvider.apiType) {
+                "ollama" -> "/api/tags"
+                "openai" -> "/v1/models"
+                else -> "/api/tags"
+            })
             
             val requestBuilder = HttpRequest.newBuilder()
                 .uri(java.net.URI(apiUrl))
                 .timeout(Duration.ofSeconds(5))
                 .GET()
             
-            // Add API key if provided
             if (testProvider.apiKey.isNotEmpty()) {
                 requestBuilder.header("Authorization", "Bearer ${testProvider.apiKey}")
             }
@@ -591,18 +579,17 @@ class AiAgentService {
             val settings = AiAgentSettings.instance.state
             val targetProvider = provider ?: settings.providers.find { it.id == settings.currentProviderId } ?: settings.providers[0]
             
-            val apiUrl = when (targetProvider.apiType) {
-                "ollama" -> "http://${targetProvider.apiHost}:${targetProvider.apiPort}/api/tags"
-                "openai" -> "${targetProvider.apiHost}/v1/models"
+            val apiUrl = buildApiUrl(targetProvider, when (targetProvider.apiType) {
+                "ollama" -> "/api/tags"
+                "openai" -> "/v1/models"
                 else -> return@withContext Result.failure(Exception("Unsupported API type"))
-            }
+            })
             
             val requestBuilder = HttpRequest.newBuilder()
                 .uri(java.net.URI(apiUrl))
                 .timeout(Duration.ofSeconds(10))
                 .GET()
             
-            // Add API key if provided
             if (targetProvider.apiKey.isNotEmpty()) {
                 requestBuilder.header("Authorization", "Bearer ${targetProvider.apiKey}")
             }

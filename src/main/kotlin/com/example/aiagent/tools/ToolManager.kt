@@ -16,6 +16,7 @@ object ToolManager {
         registerTool(SearchFilesTool())
         registerTool(ListFilesTool())
         registerTool(AndroidProjectAnalysisTool())
+        registerTool(CompileProjectTool())
     }
 
     private fun registerTool(tool: Tool) {

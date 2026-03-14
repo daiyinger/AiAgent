@@ -13,10 +13,7 @@ import dev.langchain4j.service.AiServices
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import java.nio.file.Files
-import java.nio.file.Paths
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 /**
  * 使用LangChain4j实现的AI Agent服务
@@ -24,16 +21,8 @@ import java.time.format.DateTimeFormatter
  */
 class LangChainAgentService(private val project: Project) {
     
-    private val logFile = Paths.get("C:\\aiagent_langchain.log")
-    
     private fun log(message: String) {
-        try {
-            val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-            val logMessage = "[$timestamp] $message\n"
-            Files.write(logFile, logMessage.toByteArray(), java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        LogService.log(message)
     }
     
     /**
@@ -195,6 +184,33 @@ class LangChainAgentService(private val project: Project) {
             }
             return response
         }
+        
+        @Tool("Compile the Android project")
+        fun compileProject(mode: String = "build"): String {
+            val params = mapOf("mode" to mode)
+            
+            onToolCall("compileProject", params.toString(), "执行中...")
+            
+            val result = runBlocking {
+                CompileProjectTool().execute(project, params)
+            }
+            
+            val response = when (result) {
+                is ToolResult.Success -> {
+                    onToolCall("compileProject", params.toString(), "成功")
+                    "Success: ${result.data}"
+                }
+                is ToolResult.Error -> {
+                    onToolCall("compileProject", params.toString(), "失败: ${result.message}")
+                    "Failed: ${result.message}"
+                }
+                is ToolResult.Progress -> {
+                    onToolCall("compileProject", params.toString(), "进行中: ${result.message}")
+                    "Progress: ${result.message}"
+                }
+            }
+            return response
+        }
     }
     
     /**
@@ -210,23 +226,22 @@ class LangChainAgentService(private val project: Project) {
         
         return when (currentProvider.apiType) {
             "openai" -> {
-                // 确保baseUrl以/v1结尾，LangChain4j会自动添加/chat/completions
-                val baseUrl = if (currentProvider.apiHost.endsWith("/v1")) {
-                    currentProvider.apiHost
-                } else if (currentProvider.apiHost.endsWith("/")) {
-                    "${currentProvider.apiHost}v1"
+                val baseUrl = currentProvider.apiUrl.trimEnd('/')
+                val finalUrl = if (baseUrl.endsWith("/v1")) {
+                    baseUrl
+                } else if (baseUrl.endsWith("/v1/")) {
+                    baseUrl.trimEnd('/')
                 } else {
-                    "${currentProvider.apiHost}/v1"
+                    "$baseUrl/v1"
                 }
-                log("OpenAI baseUrl: $baseUrl")
+                log("OpenAI baseUrl: $finalUrl")
                 
                 val builder = OpenAiChatModel.builder()
-                    .baseUrl(baseUrl)
+                    .baseUrl(finalUrl)
                     .apiKey(currentProvider.apiKey)
                     .modelName(settings.currentModel)
                     .timeout(java.time.Duration.ofSeconds(currentProvider.timeoutSeconds.toLong()))
                 
-                // 对于DeepSeek模型，禁用思考模式以避免reasoning_content错误
                 if (!settings.currentModel.contains("deepseek")) {
                     builder.temperature(currentProvider.temperature)
                     builder.topP(currentProvider.topP)
@@ -235,8 +250,11 @@ class LangChainAgentService(private val project: Project) {
                 builder.build()
             }
             "ollama" -> {
+                val baseUrl = currentProvider.apiUrl.trimEnd('/')
+                log("Ollama baseUrl: $baseUrl")
+                
                 OllamaChatModel.builder()
-                    .baseUrl("http://${currentProvider.apiHost}:${currentProvider.apiPort}")
+                    .baseUrl(baseUrl)
                     .modelName(settings.currentModel)
                     .temperature(currentProvider.temperature)
                     .topP(currentProvider.topP)
@@ -422,6 +440,7 @@ class LangChainAgentService(private val project: Project) {
             - editFile(path, oldContent, newContent): 编辑文件
             - searchFiles(pattern, maxResults): 搜索文件
             - analyzeProject(): 分析项目结构
+            - compileProject(mode): 编译项目，mode可选值：build（完整构建）、assemble（仅组装）、clean（清理构建）
             
             请简洁高效地完成任务，减少不必要的描述。
         """.trimIndent()

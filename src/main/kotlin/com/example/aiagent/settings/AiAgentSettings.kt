@@ -14,14 +14,14 @@ class AiAgentSettings : PersistentStateComponent<AiAgentSettings.State> {
     data class Provider(
         var id: String = "",
         var name: String = "",
-        var apiType: String = "ollama", // ollama, openai
-        var apiHost: String = "localhost",
-        var apiPort: Int = 11434,
+        var apiType: String = "ollama",
+        var apiUrl: String = "http://localhost:11434",
         var apiKey: String = "",
         var selectedModels: MutableList<String> = mutableListOf(),
         var timeoutSeconds: Int = 60,
         var temperature: Double = 0.7,
-        var topP: Double = 0.9
+        var topP: Double = 0.9,
+        var contextLength: Int = 32768
     )
     
     data class State(
@@ -30,13 +30,13 @@ class AiAgentSettings : PersistentStateComponent<AiAgentSettings.State> {
                 id = "default",
                 name = "默认本地Ollama",
                 apiType = "ollama",
-                apiHost = "localhost",
-                apiPort = 11434,
+                apiUrl = "http://localhost:11434",
                 selectedModels = mutableListOf("llama2")
             )
         ),
         var currentProviderId: String = "default",
-        var currentModel: String = "llama2"
+        var currentModel: String = "llama2",
+        var enableLogging: Boolean = false
     )
     
     private var state = State()
@@ -45,6 +45,15 @@ class AiAgentSettings : PersistentStateComponent<AiAgentSettings.State> {
     
     override fun loadState(state: State) {
         this.state = state
+        migrateOldSettings()
+    }
+    
+    private fun migrateOldSettings() {
+        this.state.providers.forEach { provider ->
+            if (!provider.apiUrl.startsWith("http")) {
+                provider.apiUrl = "http://localhost:11434"
+            }
+        }
     }
     
     companion object {

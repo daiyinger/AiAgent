@@ -3,8 +3,6 @@ package com.example.aiagent.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.hoverable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,11 +13,12 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.example.aiagent.service.AiAgentService
 import com.example.aiagent.settings.AiAgentSettings
 import com.intellij.notification.NotificationGroupManager
@@ -36,56 +35,57 @@ fun SettingsPanel(
     val settings = AiAgentSettings.instance.state
     var currentProviderIndex by remember { mutableStateOf(settings.providers.indexOfFirst { it.id == settings.currentProviderId }) }
     if (currentProviderIndex == -1) currentProviderIndex = 0
+    var selectedProviderId by remember { mutableStateOf(settings.currentProviderId) }
     
     var isTesting by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<Boolean?>(null) }
     var availableModels by remember { mutableStateOf<List<String>>(emptyList()) }
     var isLoadingModels by remember { mutableStateOf(false) }
     
-    // 添加状态变量来跟踪当前Provider的属性变化
+    var settingsClickCount by remember { mutableStateOf(0) }
+    var lastSettingsClickTime by remember { mutableStateOf(0L) }
+    var showLogToast by remember { mutableStateOf<String?>(null) }
+    
     var currentProviderName by remember { mutableStateOf(TextFieldValue("")) }
     var currentApiType by remember { mutableStateOf("") }
-    var currentApiHost by remember { mutableStateOf(TextFieldValue("")) }
-    var currentApiPort by remember { mutableStateOf(TextFieldValue("11434")) }
+    var currentApiUrl by remember { mutableStateOf(TextFieldValue("")) }
     var currentApiKey by remember { mutableStateOf(TextFieldValue("")) }
     var selectedModels by remember { mutableStateOf<List<String>>(emptyList()) }
     var currentTimeout by remember { mutableStateOf(TextFieldValue("60")) }
     var currentTemperature by remember { mutableStateOf(TextFieldValue("0.7")) }
     var currentTopP by remember { mutableStateOf(TextFieldValue("0.9")) }
+    var currentContextLength by remember { mutableStateOf(TextFieldValue("32768")) }
     
-    // 添加FocusRequester用于处理输入框焦点
     val providerNameFocusRequester = remember { FocusRequester() }
-    val apiHostFocusRequester = remember { FocusRequester() }
-    val apiPortFocusRequester = remember { FocusRequester() }
+    val apiUrlFocusRequester = remember { FocusRequester() }
     val apiKeyFocusRequester = remember { FocusRequester() }
     val timeoutFocusRequester = remember { FocusRequester() }
     val temperatureFocusRequester = remember { FocusRequester() }
     val topPFocusRequester = remember { FocusRequester() }
+    val contextLengthFocusRequester = remember { FocusRequester() }
     
     val scope = rememberCoroutineScope()
     val aiService = remember { AiAgentService() }
     
-    // 当currentProviderIndex变化时，更新所有状态变量
     LaunchedEffect(currentProviderIndex) {
         if (settings.providers.isNotEmpty()) {
             val provider = settings.providers[currentProviderIndex]
             currentProviderName = TextFieldValue(provider.name)
             currentApiType = provider.apiType
-            currentApiHost = TextFieldValue(provider.apiHost)
-            currentApiPort = TextFieldValue(provider.apiPort.toString())
+            currentApiUrl = TextFieldValue(provider.apiUrl)
             currentApiKey = TextFieldValue(provider.apiKey)
             selectedModels = provider.selectedModels
             currentTimeout = TextFieldValue(provider.timeoutSeconds.toString())
             currentTemperature = TextFieldValue(provider.temperature.toString())
             currentTopP = TextFieldValue(provider.topP.toString())
+            currentContextLength = TextFieldValue(provider.contextLength.toString())
         }
     }
     
     androidx.compose.foundation.lazy.LazyColumn(
         modifier = Modifier.padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // 设置标题区域，带图标
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -98,7 +98,20 @@ fun SettingsPanel(
                 ) {
                     Text(
                         text = "⚙️ ",
-                        style = JewelTheme.defaultTextStyle.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                        style = JewelTheme.defaultTextStyle.copy(fontWeight = FontWeight.Bold, color = Color.White),
+                        modifier = Modifier.clickable {
+                            val currentTime = System.currentTimeMillis()
+                            if (currentTime - lastSettingsClickTime < 500) {
+                                settingsClickCount++
+                                if (settingsClickCount >= 2) {
+                                    settings.enableLogging = !settings.enableLogging
+                                    settingsClickCount = 0
+                                }
+                            } else {
+                                settingsClickCount = 0
+                            }
+                            lastSettingsClickTime = currentTime
+                        }
                     )
                     Text(
                         "模型Provider配置",
@@ -112,11 +125,11 @@ fun SettingsPanel(
                             id = "provider_${System.currentTimeMillis()}",
                             name = "新Provider",
                             apiType = "ollama",
-                            apiHost = "localhost",
-                            apiPort = 11434
+                            apiUrl = "http://localhost:11434"
                         )
                         settings.providers.add(newProvider)
                         currentProviderIndex = settings.providers.size - 1
+                        selectedProviderId = newProvider.id
                         settings.currentProviderId = newProvider.id
                     }
                 ) {
@@ -125,62 +138,75 @@ fun SettingsPanel(
             }
         }
         
-        // Provider选择器
         item {
             Column {
                 Text("选择Provider:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(200.dp)
+                        .height(100.dp)
                         .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
                         .background(JewelTheme.globalColors.panelBackground)
                 ) {
                     androidx.compose.foundation.lazy.LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(8.dp)
+                        contentPadding = PaddingValues(4.dp)
                     ) {
                         items(settings.providers) { provider ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(8.dp)
+                                    .padding(2.dp)
                                     .background(
-                                        if (provider.id == settings.currentProviderId) Color(0xFF007ACC) else Color.Transparent
+                                        if (provider.id == selectedProviderId) Color(0xFF007ACC) else Color.Transparent
                                     )
                                     .border(
                                         1.dp,
-                                        if (provider.id == settings.currentProviderId) Color(0xFF007ACC) else Color.Transparent,
+                                        if (provider.id == selectedProviderId) Color(0xFF007ACC) else Color.Transparent,
                                         RoundedCornerShape(4.dp)
                                     )
-                                    .padding(8.dp)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
                                     .clickable {
-                                        currentProviderIndex = settings.providers.indexOf(provider)
-                                        settings.currentProviderId = provider.id
-                                        if (provider.selectedModels.isNotEmpty()) {
-                                            settings.currentModel = provider.selectedModels[0]
+                                        val index = settings.providers.indexOf(provider)
+                                        if (index >= 0) {
+                                            currentProviderIndex = index
+                                            selectedProviderId = provider.id
+                                            settings.currentProviderId = provider.id
+                                            if (provider.selectedModels.isNotEmpty()) {
+                                                settings.currentModel = provider.selectedModels[0]
+                                            }
                                         }
                                     }
                             ) {
-                                Text(
-                                    provider.name,
-                                    style = JewelTheme.defaultTextStyle.copy(
-                                        color = if (provider.id == settings.currentProviderId) Color.White else Color.White
-                                    ),
-                                    modifier = Modifier.weight(1f)
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        provider.name,
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = if (provider.id == selectedProviderId) Color.White else Color.White,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                    Text(
+                                        provider.apiUrl,
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = if (provider.id == selectedProviderId) Color.White.copy(alpha = 0.7f) else Color.LightGray,
+                                            fontSize = 11.sp
+                                        ),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                                 Box(
                                     modifier = Modifier
-                                        .size(24.dp)
+                                        .size(20.dp)
                                         .clickable {
                                             if (settings.providers.size > 1) {
                                                 settings.providers.remove(provider)
-                                                if (provider.id == settings.currentProviderId) {
-                                                    currentProviderIndex = 0
-                                                    settings.currentProviderId = settings.providers[0].id
-                                                    if (settings.providers[0].selectedModels.isNotEmpty()) {
-                                                        settings.currentModel = settings.providers[0].selectedModels[0]
-                                                    }
+                                                currentProviderIndex = 0
+                                                selectedProviderId = settings.providers[0].id
+                                                settings.currentProviderId = settings.providers[0].id
+                                                if (settings.providers[0].selectedModels.isNotEmpty()) {
+                                                    settings.currentModel = settings.providers[0].selectedModels[0]
                                                 }
                                             }
                                         }
@@ -198,9 +224,6 @@ fun SettingsPanel(
         }
         
         if (settings.providers.isNotEmpty()) {
-            val currentProvider = settings.providers[currentProviderIndex]
-            
-            // Provider名称
             item {
                 Column {
                     Text("Provider名称:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
@@ -213,7 +236,7 @@ fun SettingsPanel(
                         modifier = Modifier
                             .fillMaxWidth()
                             .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                            .padding(12.dp)
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
                             .background(JewelTheme.globalColors.panelBackground)
                             .focusRequester(providerNameFocusRequester)
                             .onFocusChanged { focusState ->
@@ -226,7 +249,7 @@ fun SettingsPanel(
                             },
                         singleLine = true,
                         textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
+                        cursorBrush = SolidColor(Color.White),
                         decorationBox = { innerTextField ->
                             Box(
                                 modifier = Modifier
@@ -248,70 +271,168 @@ fun SettingsPanel(
                 }
             }
             
-            // API Type
             item {
                 Column {
                     Text("API 类型:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
-                    Row {
-                        listOf("ollama", "openai").forEach { type ->
-                            Box(
-                                modifier = Modifier
-                                    .padding(8.dp)
-                                    .border(2.dp, if (currentApiType == type) Color(0xFF007ACC) else Color.Gray, RoundedCornerShape(4.dp))
-                                    .padding(12.dp)
-                                    .clickable {
-                                        currentApiType = type
-                                        settings.providers[currentProviderIndex].apiType = type
-                                    }
+                    var apiTypeExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        OutlinedButton(
+                            onClick = { apiTypeExpanded = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = type,
+                                    text = currentApiType.uppercase(),
                                     style = JewelTheme.defaultTextStyle.copy(color = Color.White)
                                 )
+                                Text(
+                                    text = "▼",
+                                    style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
+                                )
+                            }
+                        }
+                        
+                        if (apiTypeExpanded) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                                    .background(JewelTheme.globalColors.panelBackground)
+                                    .padding(4.dp)
+                            ) {
+                                Column {
+                                    listOf("ollama", "openai").forEach { type ->
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(
+                                                    if (currentApiType == type) Color(0xFF007ACC).copy(alpha = 0.3f) else Color.Transparent,
+                                                    RoundedCornerShape(4.dp)
+                                                )
+                                                .clickable {
+                                                    currentApiType = type
+                                                    settings.providers[currentProviderIndex].apiType = type
+                                                    val currentUrl = currentApiUrl.text.trimEnd('/')
+                                                    val ollamaDefault = "http://localhost:11434"
+                                                    val openaiDefault = "https://api.openai.com"
+                                                    if (type == "ollama" && currentUrl == openaiDefault) {
+                                                        currentApiUrl = TextFieldValue(ollamaDefault)
+                                                        settings.providers[currentProviderIndex].apiUrl = ollamaDefault
+                                                    } else if (type == "openai" && currentUrl == ollamaDefault) {
+                                                        currentApiUrl = TextFieldValue(openaiDefault)
+                                                        settings.providers[currentProviderIndex].apiUrl = openaiDefault
+                                                    }
+                                                    apiTypeExpanded = false
+                                                }
+                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            Text(
+                                                text = type.uppercase(),
+                                                style = JewelTheme.defaultTextStyle.copy(
+                                                    color = if (currentApiType == type) Color(0xFF007ACC) else Color.White
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
             
-            // API Host
             item {
                 Column {
-                    Text(if (currentApiType == "openai") "API Base URL:" else "API Host:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
+                    Text("API URL:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
                     androidx.compose.foundation.text.BasicTextField(
-                        value = currentApiHost,
+                        value = currentApiUrl,
                         onValueChange = { 
-                            currentApiHost = it 
-                            settings.providers[currentProviderIndex].apiHost = it.text 
+                            currentApiUrl = it 
+                            settings.providers[currentProviderIndex].apiUrl = it.text 
                         },
                         modifier = Modifier
                             .fillMaxWidth()
                             .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                            .padding(12.dp)
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
                             .background(JewelTheme.globalColors.panelBackground)
-                            .focusRequester(apiHostFocusRequester)
+                            .focusRequester(apiUrlFocusRequester)
                             .onFocusChanged { focusState ->
                                 if (focusState.isFocused) {
-                                    currentApiHost = TextFieldValue(
-                                        text = currentApiHost.text,
-                                        selection = androidx.compose.ui.text.TextRange(currentApiHost.text.length)
+                                    currentApiUrl = TextFieldValue(
+                                        text = currentApiUrl.text,
+                                        selection = androidx.compose.ui.text.TextRange(currentApiUrl.text.length)
                                     )
                                 }
                             },
                         singleLine = true,
                         textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
+                        cursorBrush = SolidColor(Color.White),
                         decorationBox = { innerTextField ->
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        apiHostFocusRequester.requestFocus()
+                                        apiUrlFocusRequester.requestFocus()
                                     }
                             ) {
-                                if (currentApiHost.text.isEmpty()) {
+                                if (currentApiUrl.text.isEmpty()) {
                                     Text(
-                                        text = if (currentApiType == "openai") "https://api.openai.com" else "localhost",
+                                        text = if (currentApiType == "openai") "https://api.openai.com" else "http://localhost:11434",
+                                        style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        }
+                    )
+                    Text(
+                        text = if (currentApiType == "ollama") "示例: http://localhost:11434" else "示例: https://api.openai.com (或自定义兼容端点)",
+                        style = JewelTheme.defaultTextStyle.copy(color = Color.Gray, fontSize = 11.sp)
+                    )
+                }
+            }
+            
+            item {
+                Column {
+                    Text("API Key:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = currentApiKey,
+                        onValueChange = { 
+                            currentApiKey = it 
+                            settings.providers[currentProviderIndex].apiKey = it.text 
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .background(JewelTheme.globalColors.panelBackground)
+                            .focusRequester(apiKeyFocusRequester)
+                            .onFocusChanged { focusState ->
+                                if (focusState.isFocused) {
+                                    currentApiKey = TextFieldValue(
+                                        text = currentApiKey.text,
+                                        selection = androidx.compose.ui.text.TextRange(currentApiKey.text.length)
+                                    )
+                                }
+                            },
+                        singleLine = true,
+                        textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
+                        cursorBrush = SolidColor(Color.White),
+                        decorationBox = { innerTextField ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        apiKeyFocusRequester.requestFocus()
+                                    }
+                            ) {
+                                if (currentApiKey.text.isEmpty()) {
+                                    Text(
+                                        text = if (currentApiType == "openai") "sk-..." else "Ollama 通常不需要 API Key",
                                         style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
                                     )
                                 }
@@ -322,108 +443,6 @@ fun SettingsPanel(
                 }
             }
             
-            // API Port (only for ollama)
-            if (currentApiType == "ollama") {
-                item {
-                    Column {
-                        Text("API Port:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
-                        androidx.compose.foundation.text.BasicTextField(
-                            value = currentApiPort,
-                            onValueChange = { 
-                                val port = it.text.toIntOrNull() ?: 11434
-                                currentApiPort = TextFieldValue(port.toString())
-                                settings.providers[currentProviderIndex].apiPort = port
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                                .padding(12.dp)
-                                .background(JewelTheme.globalColors.panelBackground)
-                                .focusRequester(apiPortFocusRequester)
-                                .onFocusChanged { focusState ->
-                                    if (focusState.isFocused) {
-                                        currentApiPort = TextFieldValue(
-                                            text = currentApiPort.text,
-                                            selection = androidx.compose.ui.text.TextRange(currentApiPort.text.length)
-                                        )
-                                    }
-                                },
-                            singleLine = true,
-                            textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
-                            cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
-                            decorationBox = { innerTextField ->
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            apiPortFocusRequester.requestFocus()
-                                        }
-                                ) {
-                                    if (currentApiPort.text.isEmpty()) {
-                                        Text(
-                                            text = "11434",
-                                            style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
-                                        )
-                                    }
-                                    innerTextField()
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-            
-            // API Key (for openai)
-            if (currentApiType == "openai") {
-                item {
-                    Column {
-                        Text("API Key:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
-                        androidx.compose.foundation.text.BasicTextField(
-                            value = currentApiKey,
-                            onValueChange = { 
-                                currentApiKey = it 
-                                settings.providers[currentProviderIndex].apiKey = it.text 
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                                .padding(12.dp)
-                                .background(JewelTheme.globalColors.panelBackground)
-                                .focusRequester(apiKeyFocusRequester)
-                                .onFocusChanged { focusState ->
-                                    if (focusState.isFocused) {
-                                        currentApiKey = TextFieldValue(
-                                            text = currentApiKey.text,
-                                            selection = androidx.compose.ui.text.TextRange(currentApiKey.text.length)
-                                        )
-                                    }
-                                },
-                            singleLine = true,
-                            textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
-                            cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
-                            decorationBox = { innerTextField ->
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            apiKeyFocusRequester.requestFocus()
-                                        }
-                                ) {
-                                    if (currentApiKey.text.isEmpty()) {
-                                        Text(
-                                            text = "sk-...",
-                                            style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
-                                        )
-                                    }
-                                    innerTextField()
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-            
-            // Model Selection
             item {
                 Column {
                     Row(
@@ -431,16 +450,20 @@ fun SettingsPanel(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("模型选择:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
+                        Text("选择模型:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
                         OutlinedButton(
                             onClick = {
                                 scope.launch {
                                     isLoadingModels = true
-                                    val result = aiService.getAvailableModels(currentProvider)
-                                    result.onSuccess { models ->
-                                        availableModels = models
-                                    }
+                                    availableModels = aiService.getAvailableModels(settings.providers[currentProviderIndex]).getOrDefault(emptyList())
                                     isLoadingModels = false
+                                    
+                                    if (availableModels.isEmpty()) {
+                                        NotificationGroupManager.getInstance()
+                                            .getNotificationGroup("AI Agent Notifications")
+                                            .createNotification("无法获取模型列表，请检查API配置", NotificationType.WARNING)
+                                            .notify(null)
+                                    }
                                 }
                             },
                             enabled = !isLoadingModels
@@ -449,54 +472,51 @@ fun SettingsPanel(
                         }
                     }
                     
-                    if (availableModels.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    if (selectedModels.isNotEmpty() || availableModels.isNotEmpty()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(300.dp)
+                                .height(120.dp)
                                 .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
                                 .background(JewelTheme.globalColors.panelBackground)
                         ) {
                             androidx.compose.foundation.lazy.LazyColumn(
                                 modifier = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(12.dp)
+                                contentPadding = PaddingValues(8.dp)
                             ) {
-                                items(availableModels) { model ->
+                                val modelsToShow = if (availableModels.isNotEmpty()) availableModels else selectedModels
+                                items(modelsToShow) { model ->
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(4.dp)
-                                            .background(
-                                            if (selectedModels.contains(model)) Color(0xFF007ACC) else Color.Transparent
-                                        )
-                                        .border(
-                                            1.dp,
-                                            if (selectedModels.contains(model)) Color(0xFF007ACC) else Color.Gray,
-                                            RoundedCornerShape(4.dp)
-                                        )
-                                            .padding(8.dp)
                                             .clickable {
-                                                val updatedModels = if (currentProvider.selectedModels.contains(model)) {
-                                                    currentProvider.selectedModels.filter { it != model }.toMutableList()
+                                                val newSelectedModels = selectedModels.toMutableList()
+                                                if (newSelectedModels.contains(model)) {
+                                                    newSelectedModels.remove(model)
                                                 } else {
-                                                    currentProvider.selectedModels.toMutableList().apply { add(model) }
+                                                    newSelectedModels.add(model)
                                                 }
-                                                currentProvider.selectedModels = updatedModels
-                                                selectedModels = updatedModels
+                                                selectedModels = newSelectedModels
+                                                settings.providers[currentProviderIndex].selectedModels = newSelectedModels.toMutableList()
+                                                if (newSelectedModels.isNotEmpty() && !newSelectedModels.contains(settings.currentModel)) {
+                                                    settings.currentModel = newSelectedModels[0]
+                                                }
                                             }
+                                            .background(
+                                                if (selectedModels.contains(model)) Color(0xFF007ACC).copy(alpha = 0.3f) else Color.Transparent,
+                                                RoundedCornerShape(4.dp)
+                                            )
+                                            .padding(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            text = model,
-                                            style = JewelTheme.defaultTextStyle.copy(
-                                                color = if (selectedModels.contains(model)) Color.White else Color.White
-                                            ),
-                                            modifier = Modifier.weight(1f)
-                                        )
                                         Box(
                                             modifier = Modifier
-                                                .size(20.dp)
+                                                .size(18.dp)
                                                 .border(
-                                                    2.dp,
+                                                    1.dp,
                                                     if (selectedModels.contains(model)) Color(0xFF007ACC) else Color.Gray,
                                                     RoundedCornerShape(4.dp)
                                                 )
@@ -509,172 +529,130 @@ fun SettingsPanel(
                                                     text = "✓",
                                                     style = JewelTheme.defaultTextStyle.copy(
                                                         color = Color.White,
-                                                        fontSize = 14.sp
+                                                        fontSize = 12.sp
                                                     ),
                                                     modifier = Modifier.align(Alignment.Center)
                                                 )
                                             }
                                         }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            model,
+                                            style = JewelTheme.defaultTextStyle.copy(color = Color.White)
+                                        )
                                     }
                                 }
                             }
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp)
+                                .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                                .background(JewelTheme.globalColors.panelBackground),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "点击\"刷新模型列表\"获取可用模型",
+                                style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
+                            )
                         }
                     }
                 }
             }
             
-            // Timeout
             item {
-                Column {
-                    Text("超时时间 (秒):", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = currentTimeout,
-                        onValueChange = { 
-                            val timeout = it.text.toIntOrNull() ?: 60
-                            currentTimeout = TextFieldValue(timeout.toString())
-                            settings.providers[currentProviderIndex].timeoutSeconds = timeout
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                            .padding(12.dp)
-                            .background(JewelTheme.globalColors.panelBackground)
-                            .focusRequester(timeoutFocusRequester)
-                            .onFocusChanged { focusState ->
-                                if (focusState.isFocused) {
-                                    currentTimeout = TextFieldValue(
-                                        text = currentTimeout.text,
-                                        selection = androidx.compose.ui.text.TextRange(currentTimeout.text.length)
-                                    )
-                                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("超时(秒):", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = currentTimeout,
+                            onValueChange = { 
+                                val timeout = it.text.toIntOrNull() ?: 60
+                                currentTimeout = TextFieldValue(timeout.toString())
+                                settings.providers[currentProviderIndex].timeoutSeconds = timeout
                             },
-                        singleLine = true,
-                        textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
-                        decorationBox = { innerTextField ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        timeoutFocusRequester.requestFocus()
-                                    }
-                            ) {
-                                if (currentTimeout.text.isEmpty()) {
-                                    Text(
-                                        text = "60",
-                                        style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
-                                    )
-                                }
-                                innerTextField()
-                            }
-                        }
-                    )
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .background(JewelTheme.globalColors.panelBackground)
+                                .focusRequester(timeoutFocusRequester),
+                            singleLine = true,
+                            textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
+                            cursorBrush = SolidColor(Color.White)
+                        )
+                    }
+                    
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("温度:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = currentTemperature,
+                            onValueChange = { 
+                                val temperature = it.text.toDoubleOrNull()?.coerceIn(0.0, 1.0) ?: 0.7
+                                currentTemperature = TextFieldValue(temperature.toString())
+                                settings.providers[currentProviderIndex].temperature = temperature
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .background(JewelTheme.globalColors.panelBackground)
+                                .focusRequester(temperatureFocusRequester),
+                            singleLine = true,
+                            textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
+                            cursorBrush = SolidColor(Color.White)
+                        )
+                    }
+                    
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Top P:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = currentTopP,
+                            onValueChange = { 
+                                val topP = it.text.toDoubleOrNull()?.coerceIn(0.0, 1.0) ?: 0.9
+                                currentTopP = TextFieldValue(topP.toString())
+                                settings.providers[currentProviderIndex].topP = topP
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .background(JewelTheme.globalColors.panelBackground)
+                                .focusRequester(topPFocusRequester),
+                            singleLine = true,
+                            textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
+                            cursorBrush = SolidColor(Color.White)
+                        )
+                    }
+                    
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("上下文长度:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = currentContextLength,
+                            onValueChange = { 
+                                val contextLength = it.text.toIntOrNull()?.coerceAtLeast(512) ?: 32768
+                                currentContextLength = TextFieldValue(contextLength.toString())
+                                settings.providers[currentProviderIndex].contextLength = contextLength
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .background(JewelTheme.globalColors.panelBackground)
+                                .focusRequester(contextLengthFocusRequester),
+                            singleLine = true,
+                            textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
+                            cursorBrush = SolidColor(Color.White)
+                        )
+                    }
                 }
             }
             
-            // Temperature
-            item {
-                Column {
-                    Text("温度 (0.0-1.0):", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = currentTemperature,
-                        onValueChange = { 
-                            val temperature = it.text.toDoubleOrNull() ?: 0.7
-                            currentTemperature = TextFieldValue(temperature.toString())
-                            settings.providers[currentProviderIndex].temperature = temperature
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                            .padding(12.dp)
-                            .background(JewelTheme.globalColors.panelBackground)
-                            .focusRequester(temperatureFocusRequester)
-                            .onFocusChanged { focusState ->
-                                if (focusState.isFocused) {
-                                    currentTemperature = TextFieldValue(
-                                        text = currentTemperature.text,
-                                        selection = androidx.compose.ui.text.TextRange(currentTemperature.text.length)
-                                    )
-                                }
-                            },
-                        singleLine = true,
-                        textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
-                        decorationBox = { innerTextField ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        temperatureFocusRequester.requestFocus()
-                                    }
-                            ) {
-                                if (currentTemperature.text.isEmpty()) {
-                                    Text(
-                                        text = "0.7",
-                                        style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
-                                    )
-                                }
-                                innerTextField()
-                            }
-                        }
-                    )
-                }
-            }
-            
-            // Top P
-            item {
-                Column {
-                    Text("Top P (0.0-1.0):", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = currentTopP,
-                        onValueChange = { 
-                            val topP = it.text.toDoubleOrNull() ?: 0.9
-                            currentTopP = TextFieldValue(topP.toString())
-                            settings.providers[currentProviderIndex].topP = topP
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                            .padding(12.dp)
-                            .background(JewelTheme.globalColors.panelBackground)
-                            .focusRequester(topPFocusRequester)
-                            .onFocusChanged { focusState ->
-                                if (focusState.isFocused) {
-                                    currentTopP = TextFieldValue(
-                                        text = currentTopP.text,
-                                        selection = androidx.compose.ui.text.TextRange(currentTopP.text.length)
-                                    )
-                                }
-                            },
-                        singleLine = true,
-                        textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
-                        decorationBox = { innerTextField ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        topPFocusRequester.requestFocus()
-                                    }
-                            ) {
-                                if (currentTopP.text.isEmpty()) {
-                                    Text(
-                                        text = "0.9",
-                                        style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
-                                    )
-                                }
-                                innerTextField()
-                            }
-                        }
-                    )
-                }
-            }
-            
-            item {
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-            
-            // Test Connection Button
             item {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -715,180 +693,14 @@ fun SettingsPanel(
         }
         
         item {
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-        
-        // Save Button
-        item {
-            OutlinedButton(
-                onClick = {
-                    NotificationGroupManager.getInstance()
-                        .getNotificationGroup("AI Agent Notifications")
-                        .createNotification("配置已保存", NotificationType.INFORMATION)
-                        .notify(null)
-                    
-                    onSettingsSaved()
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("保存配置")
-            }
-        }
-        
-        item {
             Spacer(modifier = Modifier.height(8.dp))
         }
         
-        // Help Text
         item {
             Text(
-                "提示：本插件支持多个模型Provider，每个Provider可以配置不同的API类型和模型\n常用模型：llama2, codellama, qwen2.5-coder, deepseek-coder 等",
-                style = JewelTheme.defaultTextStyle.copy(color = Color.White)
+                "提示：设置会在关闭对话框时自动保存。支持多个Provider配置。",
+                style = JewelTheme.defaultTextStyle.copy(color = Color.Gray, fontSize = 11.sp)
             )
-        }
-    }
-}
-
-@Composable
-private fun ClickableTextField(
-    value: String,
-    placeholder: String,
-    onValueChange: (String) -> Unit
-) {
-    var isEditing by remember { mutableStateOf(false) }
-    val interactionSource = remember { MutableInteractionSource() }
-    var isHovered by remember { mutableStateOf(false) }
-    
-    LaunchedEffect(interactionSource) {
-        interactionSource.interactions.collect { interaction ->
-            when (interaction) {
-                is androidx.compose.foundation.interaction.HoverInteraction.Enter -> isHovered = true
-                is androidx.compose.foundation.interaction.HoverInteraction.Exit -> isHovered = false
-            }
-        }
-    }
-    
-    val backgroundColor = if (isHovered) {
-        Color(0xFFE3F2FD)
-    } else {
-        Color.Transparent
-    }
-    
-    val borderColor = if (isHovered) {
-        Color(0xFF2196F3)
-    } else {
-        Color.Gray
-    }
-    
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(backgroundColor, RoundedCornerShape(4.dp))
-            .border(1.dp, borderColor, RoundedCornerShape(4.dp))
-            .padding(8.dp)
-            .clickable(
-                enabled = true,
-                onClick = {
-                    isEditing = true
-                },
-                interactionSource = interactionSource,
-                indication = null
-            )
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = value.ifEmpty { placeholder },
-                style = JewelTheme.defaultTextStyle
-            )
-            Text(
-                text = "✏️",
-                style = JewelTheme.defaultTextStyle
-            )
-        }
-    }
-    
-    // 显示编辑对话框
-    if (isEditing) {
-        EditDialog(
-            currentValue = value,
-            placeholder = placeholder,
-            onConfirm = { newValue ->
-                onValueChange(newValue)
-                isEditing = false
-            },
-            onDismiss = {
-                isEditing = false
-            }
-        )
-    }
-}
-
-@Composable
-private fun EditDialog(
-    currentValue: String,
-    placeholder: String,
-    onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var inputValue by remember { mutableStateOf(currentValue) }
-    
-    Dialog(
-        onDismissRequest = onDismiss
-    ) {
-        Column(
-            modifier = Modifier
-                .background(JewelTheme.globalColors.panelBackground, RoundedCornerShape(8.dp))
-                .padding(16.dp)
-        ) {
-            Text(
-                text = "请输入值:",
-                style = JewelTheme.defaultTextStyle.copy(fontWeight = FontWeight.Bold, color = Color.White),
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-            
-            androidx.compose.foundation.text.BasicTextField(
-                value = inputValue,
-                onValueChange = { inputValue = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                    .padding(12.dp)
-                    .background(JewelTheme.globalColors.panelBackground),
-                singleLine = true,
-                textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
-                decorationBox = { innerTextField ->
-                    if (inputValue.isEmpty()) {
-                        Text(
-                            text = placeholder,
-                            style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
-                        )
-                    }
-                    innerTextField()
-                }
-            )
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("取消")
-                }
-                
-                OutlinedButton(
-                    onClick = { onConfirm(inputValue) },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("确定")
-                }
-            }
         }
     }
 }

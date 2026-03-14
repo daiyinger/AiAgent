@@ -19,8 +19,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.example.aiagent.service.AiAgentService
+import com.example.aiagent.service.ChatStateService
+import com.example.aiagent.service.ChatStateService.MessageState
+import com.example.aiagent.service.ChatStateService.SessionState
 import com.example.aiagent.service.LangChainAgentService
+import com.example.aiagent.service.toLocalDateTime
+import com.example.aiagent.service.toStateString
 import com.example.aiagent.settings.AiAgentSettings
 import com.example.aiagent.tools.ToolResult
 import com.intellij.notification.NotificationGroupManager
@@ -33,68 +37,40 @@ import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.*
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
-import java.io.File
-import java.io.FileWriter
-import java.io.BufferedWriter
+import com.example.aiagent.service.LogService
 
-// 日志记录函数
 private fun log(message: String) {
-    try {
-        val logFile = File("C:\\AiAgent\\logs", "chat_panel.log")
-        logFile.parentFile?.mkdirs()
-        
-        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
-        val timestamp = LocalDateTime.now().format(formatter)
-        val logMessage = "[$timestamp] $message\n"
-        
-        BufferedWriter(FileWriter(logFile, true)).use { writer ->
-            writer.write(logMessage)
-        }
-    } catch (e: Exception) {
-        e.printStackTrace()
-    }
+    LogService.log(message)
 }
 
 @Composable
 fun ChatPanel() {
     val settings = AiAgentSettings.instance.state
-    val aiService = remember { AiAgentService() }
     val currentProject = remember { ProjectManager.getInstance().openProjects.firstOrNull() }
     val langChainService = remember { currentProject?.let { LangChainAgentService(it) } }
+    val chatStateService = remember { ChatStateService.instance }
     
-    // 选择使用哪个服务
-    var useLangChain by remember { mutableStateOf(true) }
+    val sessions = remember { mutableStateOf(chatStateService.sessions.toMutableList()) }
+    var currentSessionIndex by remember { mutableStateOf(chatStateService.currentSessionIndex) }
     
-    // 会话管理
-    val sessions = remember { mutableStateOf(mutableListOf<ChatSession>()) }
-    var currentSessionIndex by remember { mutableStateOf(0) }
-    
-    // 确保至少有一个会话
-    LaunchedEffect(Unit) {
-        if (sessions.value.isEmpty()) {
-            sessions.value.add(ChatSession(
-                id = System.currentTimeMillis().toString(),
-                title = "新会话",
-                messages = mutableListOf()
-            ))
+    val currentSessionState = sessions.value.getOrElse(currentSessionIndex) { 
+        sessions.value.firstOrNull() ?: SessionState(
+            id = System.currentTimeMillis().toString(),
+            title = "新会话"
+        ).also { 
+            sessions.value.add(it) 
         }
     }
     
-    val currentSession = sessions.value.getOrElse(currentSessionIndex) { sessions.value.firstOrNull() ?: run {
-        val newSession = ChatSession(
-            id = System.currentTimeMillis().toString(),
-            title = "新会话",
-            messages = mutableListOf()
-        )
-        sessions.value.add(newSession)
-        newSession
-    }}
+    val messages = remember { 
+        mutableStateOf(currentSessionState.messages.map { it.toChatMessage() }.toMutableList()) 
+    }
     
-    val messages = remember { mutableStateOf(currentSession.messages) }
     var inputText by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
     var isSettingsOpen by remember { mutableStateOf(false) }
     var isSessionManagerOpen by remember { mutableStateOf(false) }
+    var settingsVersion by remember { mutableStateOf(0) }
     
     // 文本选择颜色配置
     val textSelectionColors = TextSelectionColors(
@@ -250,34 +226,13 @@ fun ChatPanel() {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // 服务选择
-                    Row(
-                        modifier = Modifier.padding(end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "服务:",
-                            style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray, fontSize = 12.sp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        OutlinedButton(
-                            onClick = { useLangChain = !useLangChain },
-                            modifier = Modifier.height(28.dp)
-                        ) {
-                            Text(
-                                text = if (useLangChain) "LangChain4j" else "Original",
-                                style = JewelTheme.defaultTextStyle.copy(fontSize = 12.sp)
-                            )
-                        }
-                    }
-                    
                     // 模型选择
-                    ModelSelector()
+                    ModelSelector(settingsVersion)
                     
                     // 发送/停止按钮
                     OutlinedButton(
                         onClick = {
                             if (isSending) {
-                                // 停止发送
                                 isSending = false
                                 log("用户停止发送消息")
                             } else if (inputText.trim().isNotEmpty()) {
@@ -287,20 +242,19 @@ fun ChatPanel() {
                                     timestamp = LocalDateTime.now()
                                 )
                                 
-                                // 更新消息列表
                                 val updatedMessages = messages.value.toMutableList()
                                 updatedMessages.add(userMessage)
                                 messages.value = updatedMessages
+                                
+                                chatStateService.addMessageToCurrentSession(userMessage.toMessageState())
                                 
                                 val originalInput = inputText
                                 inputText = ""
                                 isSending = true
                                 
-                                // 生成AI回复
                                 val aiMessageId = (System.currentTimeMillis() + 1).toString()
                                 val aiMessageTimestamp = LocalDateTime.now()
                                 
-                                // 创建初始AI消息
                                 val initialAiMessage = AiMessage(
                                     id = aiMessageId,
                                     content = "",
@@ -308,18 +262,17 @@ fun ChatPanel() {
                                     isGenerating = true
                                 )
                                 
-                                // 更新消息列表
                                 val updatedMessagesWithAi = messages.value.toMutableList()
                                 updatedMessagesWithAi.add(initialAiMessage)
                                 messages.value = updatedMessagesWithAi
                                 
-                                log("开始发送消息: $originalInput, 使用服务: ${if (useLangChain) "LangChain4j" else "Original"}")
+                                chatStateService.addMessageToCurrentSession(initialAiMessage.toMessageState())
                                 
-                                // 添加token使用状态
+                                log("开始发送消息: $originalInput")
+                                
                                 var tokenUsage: Pair<Int, Int>? = null
                                 
-                                if (useLangChain && langChainService != null) {
-                                    // 使用LangChain4j服务
+                                if (langChainService != null) {
                                     CoroutineScope(Dispatchers.IO).launch {
                                         var currentContent = ""
                                         var isGenerating = true
@@ -327,12 +280,11 @@ fun ChatPanel() {
                                         val result = langChainService.sendMessage(
                                             message = originalInput,
                                             onChunk = { chunk ->
-                                                if (!isSending) return@sendMessage // 检查是否已停止
+                                                if (!isSending) return@sendMessage
                                                 log("收到LangChain4j消息chunk: ${chunk.take(50)}...")
                                                 currentContent += chunk
                                                 isGenerating = true
                                                 
-                                                // 在UI线程中更新消息
                                                 CoroutineScope(Dispatchers.Main).launch {
                                                     val newMessages = messages.value.toMutableList()
                                                     val updatedMessage = AiMessage(
@@ -346,40 +298,37 @@ fun ChatPanel() {
                                                 }
                                             },
                                             onToolCall = { toolCall ->
-                                                if (!isSending) return@sendMessage // 检查是否已停止
+                                                if (!isSending) return@sendMessage
                                                 log("收到LangChain4j工具调用: ${toolCall.toolName}, ID: ${toolCall.id}")
-                                                // 在UI线程中更新或添加工具调用消息
                                                 CoroutineScope(Dispatchers.Main).launch {
                                                     val newMessages = messages.value.toMutableList()
                                                     
-                                                    // 查找是否存在相同ID的工具调用消息
                                                     val existingIndex = newMessages.indexOfFirst { it is ToolCallMessage && it.id == toolCall.id }
                                                     
                                                     if (existingIndex >= 0) {
-                                                        // 更新现有消息
                                                         newMessages[existingIndex] = toolCall
                                                         log("更新工具调用消息: ${toolCall.toolName}")
                                                     } else {
-                                                        // 添加新消息
                                                         newMessages.add(toolCall)
                                                         log("添加新工具调用消息: ${toolCall.toolName}")
+                                                        chatStateService.addMessageToCurrentSession(toolCall.toMessageState())
                                                     }
                                                     
                                                     messages.value = newMessages
                                                 }
                                             },
                                             onTokenUsage = { inputTokens, outputTokens ->
-                                                // 保存token使用情况
                                                 tokenUsage = Pair(inputTokens, outputTokens)
                                                 log("Token使用情况: 输入=$inputTokens, 输出=$outputTokens")
                                             }
                                         )
                                         
-                                        // 发送完成后更新状态
                                         CoroutineScope(Dispatchers.Main).launch {
                                             isGenerating = false
                                             isSending = false
                                             log("LangChain4j消息发送完成")
+                                            
+                                            sessions.value = chatStateService.sessions.toMutableList()
                                             
                                             val newMessages = messages.value.toMutableList()
                                             val updatedMessage = AiMessage(
@@ -390,7 +339,9 @@ fun ChatPanel() {
                                             )
                                             newMessages[newMessages.size - 1] = updatedMessage
                                             
-                                            // 添加token使用消息
+                                            chatStateService.updateLastAiMessageContent(currentContent)
+                                            chatStateService.setLastAiMessageGenerating(false)
+                                            
                                             tokenUsage?.let {
                                                 val tokenMessage = TokenUsageMessage(
                                                     id = (System.currentTimeMillis() + 3).toString(),
@@ -400,117 +351,13 @@ fun ChatPanel() {
                                                     timestamp = LocalDateTime.now()
                                                 )
                                                 newMessages.add(tokenMessage)
+                                                chatStateService.addMessageToCurrentSession(tokenMessage.toMessageState())
                                             }
                                             
                                             messages.value = newMessages
                                             
                                             result.onFailure { e ->
                                                 log("LangChain4j发送失败: ${e.message}")
-                                                NotificationGroupManager.getInstance()
-                                                    .getNotificationGroup("AI Agent Notifications")
-                                                    .createNotification("发送失败: ${e.message}", NotificationType.ERROR)
-                                                    .notify(null)
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // 使用原始服务
-                                    // 构建包含工具定义的提示
-                                    val promptWithTools = aiService.buildPromptWithTools(originalInput)
-                                    
-                                    // 使用局部变量来追踪消息内容和状态
-                                    var currentContent = ""
-                                    var isGenerating = true
-                                    
-                                    CoroutineScope(Dispatchers.IO).launch {
-                                        val result = aiService.sendMessageStream(promptWithTools, 
-                                            onChunk = { chunk ->
-                                                if (!isSending) return@sendMessageStream // 检查是否已停止
-                                                log("收到Original消息chunk: ${chunk.take(50)}...")
-                                                // 更新局部变量
-                                                currentContent += chunk
-                                                isGenerating = true
-                                                log("更新AI消息内容，当前长度: ${currentContent.length}")
-                                                
-                                                // 在UI线程中更新消息
-                                                CoroutineScope(Dispatchers.Main).launch {
-                                                    // 替换整个消息列表，确保Compose检测到变化
-                                                    val newMessages = messages.value.toMutableList()
-                                                    val updatedMessage = AiMessage(
-                                                        id = aiMessageId,
-                                                        content = currentContent,
-                                                        timestamp = aiMessageTimestamp,
-                                                        isGenerating = isGenerating
-                                                    )
-                                                    newMessages[newMessages.size - 1] = updatedMessage
-                                                    messages.value = newMessages
-                                                    log("消息更新后: ${currentContent}")
-                                                }
-                                            },
-                                            onToolCall = { toolCall ->
-                                                if (!isSending) return@sendMessageStream // 检查是否已停止
-                                                log("收到工具调用: ${toolCall.toolName}")
-                                                // 在UI线程中处理工具调用
-                                                CoroutineScope(Dispatchers.Main).launch {
-                                                    // 添加工具调用消息
-                                                    val toolCallMessage = ToolCallMessage(
-                                                        id = (System.currentTimeMillis() + 2).toString(),
-                                                        toolName = toolCall.toolName,
-                                                        parameters = toolCall.parameters,
-                                                        timestamp = LocalDateTime.now(),
-                                                        isExecuting = true
-                                                    )
-                                                    val newMessages = messages.value.toMutableList()
-                                                    newMessages.add(toolCallMessage)
-                                                    messages.value = newMessages
-                                                    
-                                                    // 执行工具调用
-                                                    CoroutineScope(Dispatchers.IO).launch {
-                                                        if (!isSending) return@launch // 检查是否已停止
-                                                        val toolResult = aiService.executeToolCall(toolCall)
-                                                        log("工具执行结果: $toolResult")
-                                                        
-                                                        // 更新工具调用消息
-                                                        CoroutineScope(Dispatchers.Main).launch {
-                                                            val updatedMessages = messages.value.toMutableList()
-                                                            val index = updatedMessages.indexOfLast { it.id == toolCallMessage.id }
-                                                            if (index >= 0) {
-                                                                val updatedToolCallMessage = toolCallMessage.copy(
-                                                                    isExecuting = false,
-                                                                    result = when (toolResult) {
-                                                                        is com.example.aiagent.tools.ToolResult.Success -> "Success: ${toolResult.data}"
-                                                                        is com.example.aiagent.tools.ToolResult.Error -> "Error: ${toolResult.message}"
-                                                                        is com.example.aiagent.tools.ToolResult.Progress -> "Progress: ${toolResult.message}"
-                                                                    }
-                                                                )
-                                                                updatedMessages[index] = updatedToolCallMessage
-                                                                messages.value = updatedMessages
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        )
-                                        
-                                        // 发送完成后更新状态
-                                        CoroutineScope(Dispatchers.Main).launch {
-                                            isGenerating = false
-                                            isSending = false
-                                            log("Original消息发送完成，生成状态: ${isGenerating}")
-                                            
-                                            // 替换整个消息列表，确保Compose检测到变化
-                                            val newMessages = messages.value.toMutableList()
-                                            val updatedMessage = AiMessage(
-                                                id = aiMessageId,
-                                                content = currentContent,
-                                                timestamp = aiMessageTimestamp,
-                                                isGenerating = isGenerating
-                                            )
-                                            newMessages[newMessages.size - 1] = updatedMessage
-                                            messages.value = newMessages
-                                            
-                                            result.onFailure { e ->
-                                                log("Original发送失败: ${e.message}")
                                                 NotificationGroupManager.getInstance()
                                                     .getNotificationGroup("AI Agent Notifications")
                                                     .createNotification("发送失败: ${e.message}", NotificationType.ERROR)
@@ -553,7 +400,10 @@ fun ChatPanel() {
                         style = JewelTheme.defaultTextStyle.copy(fontWeight = FontWeight.Bold, color = Color.White)
                     )
                     OutlinedButton(
-                        onClick = { isSettingsOpen = false }
+                        onClick = { 
+                            isSettingsOpen = false
+                            settingsVersion++
+                        }
                     ) {
                         Text("关闭")
                     }
@@ -567,7 +417,7 @@ fun ChatPanel() {
     }
     
     // 会话管理对话框
-                if (isSessionManagerOpen) {
+    if (isSessionManagerOpen) {
         Dialog(
             onDismissRequest = { isSessionManagerOpen = false }
         ) {
@@ -596,7 +446,6 @@ fun ChatPanel() {
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                // 会话列表
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -608,31 +457,32 @@ fun ChatPanel() {
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(8.dp)
                     ) {
-                        items(sessions.value) {
+                        items(sessions.value) { sessionState ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(8.dp)
                                     .background(
-                                        if (it.id == currentSession.id) Color(0xFF007ACC) else Color.Transparent
+                                        if (sessionState.id == currentSessionState.id) Color(0xFF007ACC) else Color.Transparent
                                     )
                                     .border(
                                         1.dp,
-                                        if (it.id == currentSession.id) Color(0xFF007ACC) else Color.Transparent,
+                                        if (sessionState.id == currentSessionState.id) Color(0xFF007ACC) else Color.Transparent,
                                         RoundedCornerShape(4.dp)
                                     )
                                     .padding(8.dp)
                                     .clickable {
-                                        currentSessionIndex = sessions.value.indexOf(it)
-                                        // 更新当前会话的消息列表
-                                        messages.value = it.messages
+                                        val newIndex = sessions.value.indexOf(sessionState)
+                                        currentSessionIndex = newIndex
+                                        chatStateService.currentSessionIndex = newIndex
+                                        messages.value = sessionState.messages.map { it.toChatMessage() }.toMutableList()
                                         isSessionManagerOpen = false
                                     }
                             ) {
                                 Text(
-                                    it.title,
+                                    sessionState.title,
                                     style = JewelTheme.defaultTextStyle.copy(
-                                        color = if (it.id == currentSession.id) Color.White else Color.White
+                                        color = if (sessionState.id == currentSessionState.id) Color.White else Color.White
                                     ),
                                     modifier = Modifier.weight(1f)
                                 )
@@ -641,14 +491,13 @@ fun ChatPanel() {
                                         .size(24.dp)
                                         .clickable {
                                             if (sessions.value.size > 1) {
-                                                val updatedSessions = sessions.value.toMutableList()
-                                                updatedSessions.remove(it)
-                                                sessions.value = updatedSessions
-                                                if (it.id == currentSession.id) {
+                                                val index = sessions.value.indexOf(sessionState)
+                                                chatStateService.removeSession(index)
+                                                sessions.value = chatStateService.sessions.toMutableList()
+                                                if (sessionState.id == currentSessionState.id) {
                                                     currentSessionIndex = 0
-                                                    // 更新当前会话的消息列表
                                                     if (sessions.value.isNotEmpty()) {
-                                                        messages.value = sessions.value[0].messages
+                                                        messages.value = sessions.value[0].messages.map { it.toChatMessage() }.toMutableList()
                                                     }
                                                 }
                                             }
@@ -666,20 +515,13 @@ fun ChatPanel() {
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                // 新建会话按钮
                 OutlinedButton(
                     onClick = {
-                        val newSession = ChatSession(
-                            id = System.currentTimeMillis().toString(),
-                            title = "新会话",
-                            messages = mutableListOf()
-                        )
-                        val updatedSessions = sessions.value.toMutableList()
-                        updatedSessions.add(newSession)
-                        sessions.value = updatedSessions
+                        val newSession = chatStateService.createNewSession()
+                        sessions.value = chatStateService.sessions.toMutableList()
                         currentSessionIndex = sessions.value.size - 1
-                        // 更新当前会话的消息列表
-                        messages.value = newSession.messages
+                        chatStateService.currentSessionIndex = currentSessionIndex
+                        messages.value = mutableListOf()
                         isSessionManagerOpen = false
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -692,43 +534,60 @@ fun ChatPanel() {
 }
 
 @Composable
-private fun ModelSelector() {
-    val settings = AiAgentSettings.instance.state
-    var expanded by remember { mutableStateOf(false) }
-    
-    val currentProvider = settings.providers.find { it.id == settings.currentProviderId } ?: settings.providers.firstOrNull()
-    val allSelectedModels = currentProvider?.selectedModels ?: emptyList()
-    
-    Box {
-        OutlinedButton(
-            onClick = { expanded = true }
-        ) {
-            Text(settings.currentModel)
-        }
+private fun ModelSelector(settingsVersion: Int = 0) {
+    key(settingsVersion) {
+        val settings = AiAgentSettings.instance.state
+        var expanded by remember { mutableStateOf(false) }
         
-        if (expanded) {
-            Box(
-                modifier = Modifier
-                    .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
-                    .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                    .padding(8.dp)
+        val currentProviderId = settings.currentProviderId
+        val currentProvider = settings.providers.find { it.id == currentProviderId } ?: settings.providers.firstOrNull()
+        val allSelectedModels = currentProvider?.selectedModels ?: emptyList()
+        val currentModel = settings.currentModel
+        
+        Box(modifier = Modifier.wrapContentSize(Alignment.BottomStart)) {
+            OutlinedButton(
+                onClick = { expanded = true }
             ) {
-                Column {
-                    allSelectedModels.forEach { model ->
-                        Box(
-                            modifier = Modifier
-                                .padding(4.dp)
-                                .clickable {
-                                    settings.currentModel = model
-                                    expanded = false
+                Text(currentModel)
+            }
+            
+            if (expanded) {
+                Box(
+                    modifier = Modifier
+                        .absoluteOffset(y = (-4).dp)
+                        .width(200.dp)
+                        .heightIn(max = 150.dp)
+                        .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
+                        .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                        .padding(4.dp)
+                ) {
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        reverseLayout = true
+                    ) {
+                        allSelectedModels.reversed().forEach { model ->
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            if (model == currentModel) Color(0xFF007ACC) else Color.Transparent,
+                                            RoundedCornerShape(4.dp)
+                                        )
+                                        .clickable {
+                                            settings.currentModel = model
+                                            expanded = false
+                                        }
+                                        .padding(8.dp)
+                                ) {
+                                    Text(
+                                        text = model,
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = if (model == currentModel) Color.White else Color.LightGray,
+                                            fontWeight = if (model == currentModel) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    )
                                 }
-                        ) {
-                            Text(
-                                text = model,
-                                style = JewelTheme.defaultTextStyle.copy(
-                                    color = if (model == settings.currentModel) Color(0xFF007ACC) else Color.White
-                                )
-                            )
+                            }
                         }
                     }
                 }
@@ -804,6 +663,25 @@ private fun AiMessageItem(message: AiMessage) {
 
 @Composable
 private fun ToolCallMessageItem(message: ToolCallMessage) {
+    var isExpanded by remember { mutableStateOf(false) }
+    
+    val fileName: String? = (message.parameters["filePath"] 
+        ?: message.parameters["fileName"] 
+        ?: message.parameters["path"]
+        ?: message.parameters["directory"])?.toString()
+    
+    val statusText = when {
+        message.isExecuting -> "执行中"
+        message.result == "成功" || message.result?.startsWith("Success") == true -> "完成"
+        else -> "失败"
+    }
+    
+    val statusColor = when {
+        message.isExecuting -> Color(0xFFFF9800)
+        message.result == "成功" || message.result?.startsWith("Success") == true -> Color(0xFF4CAF50)
+        else -> Color(0xFFF44336)
+    }
+    
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start
@@ -813,22 +691,19 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                 .widthIn(max = 400.dp)
                 .background(
                     when {
-                        message.isExecuting -> Color(0xFF2D3748) // 执行中 - 深蓝色
-                        message.result == "成功" || message.result?.startsWith("Success") == true -> Color(0xFF1A2A1A) // 成功 - 深绿色
-                        else -> Color(0xFF2A1A1A) // 失败 - 深红色
+                        message.isExecuting -> Color(0xFF2D3748)
+                        message.result == "成功" || message.result?.startsWith("Success") == true -> Color(0xFF1A2A1A)
+                        else -> Color(0xFF2A1A1A)
                     }, 
-                    RoundedCornerShape(12.dp)
+                    RoundedCornerShape(8.dp)
                 )
                 .border(
                     1.dp, 
-                    when {
-                        message.isExecuting -> Color(0xFFFF9800) // 执行中 - 橙色
-                        message.result == "成功" || message.result?.startsWith("Success") == true -> Color(0xFF4CAF50) // 成功 - 绿色
-                        else -> Color(0xFFF44336) // 失败 - 红色
-                    }, 
-                    RoundedCornerShape(12.dp)
+                    statusColor, 
+                    RoundedCornerShape(8.dp)
                 )
-                .padding(12.dp)
+                .clickable { isExpanded = !isExpanded }
+                .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -837,132 +712,133 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .background(
-                                when {
-                                    message.isExecuting -> Color(0xFFFF9800)
-                                    message.result == "成功" || message.result?.startsWith("Success") == true -> Color(0xFF4CAF50)
-                                    else -> Color(0xFFF44336)
-                                },
-                                RoundedCornerShape(4.dp)
-                            )
-                            .padding(2.dp)
-                    ) {
-                        Text(
-                            text = when {
-                                message.isExecuting -> "⏳"
-                                message.result == "成功" || message.result?.startsWith("Success") == true -> "✓"
-                                else -> "✗"
-                            },
-                            style = JewelTheme.defaultTextStyle.copy(
-                                color = Color.White,
-                                fontSize = 12.sp
-                            )
-                        )
-                    }
+                    Text(
+                        text = when {
+                            message.isExecuting -> "⏳"
+                            message.result == "成功" || message.result?.startsWith("Success") == true -> "✓"
+                            else -> "✗"
+                        },
+                        style = JewelTheme.defaultTextStyle.copy(fontSize = 12.sp)
+                    )
                     Text(
                         text = message.toolName,
                         style = JewelTheme.defaultTextStyle.copy(
                             color = Color.White,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp
                         )
                     )
-                }
-                Text(
-                    text = when {
-                        message.isExecuting -> "执行中"
-                        message.result == "成功" || message.result?.startsWith("Success") == true -> "完成"
-                        else -> "失败"
-                    },
-                    style = JewelTheme.defaultTextStyle.copy(
-                        color = when {
-                            message.isExecuting -> Color(0xFFFF9800)
-                            message.result == "成功" || message.result?.startsWith("Success") == true -> Color(0xFF4CAF50)
-                            else -> Color(0xFFF44336)
-                        },
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                )
-            }
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            if (message.parameters.isNotEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF1A1A1A), RoundedCornerShape(8.dp))
-                        .padding(8.dp)
-                ) {
-                    Text(
-                        text = "参数",
-                        style = JewelTheme.defaultTextStyle.copy(
-                            color = Color.LightGray,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        modifier = Modifier.padding(bottom = 4.dp)
-                    )
-                    SelectionContainer {
-                        Column {
-                            message.parameters.forEach { (key, value) ->
-                                Text(
-                                    text = "$key: $value",
-                                    style = JewelTheme.defaultTextStyle.copy(
-                                        color = Color.White,
-                                        fontSize = 11.sp
-                                    )
-                                )
-                            }
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-            
-            if (message.result != null) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            if (message.result == "成功" || message.result.startsWith("Success")) Color(0xFF1A2A1A) else Color(0xFF2A1A1A),
-                            RoundedCornerShape(8.dp)
-                        )
-                        .padding(8.dp)
-                ) {
-                    Text(
-                        text = "结果",
-                        style = JewelTheme.defaultTextStyle.copy(
-                            color = Color.LightGray,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        modifier = Modifier.padding(bottom = 4.dp)
-                    )
-                    SelectionContainer {
+                    if (fileName != null) {
+                        val displayFileName = if (fileName.length > 30) fileName.substring(0, 30) + "..." else fileName
                         Text(
-                            text = message.result,
+                            text = displayFileName,
                             style = JewelTheme.defaultTextStyle.copy(
-                                color = if (message.result == "成功" || message.result.startsWith("Success")) Color(0xFF4CAF50) else Color(0xFFF44336),
-                                fontSize = 11.sp
+                                color = Color.LightGray,
+                                fontSize = 12.sp
                             ),
-                            maxLines = 8,
+                            maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
                 }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = statusText,
+                        style = JewelTheme.defaultTextStyle.copy(
+                            color = statusColor,
+                            fontSize = 12.sp
+                        )
+                    )
+                    Text(
+                        text = if (isExpanded) "▼" else "▶",
+                        style = JewelTheme.defaultTextStyle.copy(
+                            color = Color.LightGray,
+                            fontSize = 10.sp
+                        )
+                    )
+                }
             }
             
-            Text(
-                text = message.timestamp.format(DateTimeFormatter.ofPattern("HH:mm")),
-                style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray, fontSize = 10.sp),
-                modifier = Modifier.align(Alignment.End)
-            )
+            if (isExpanded) {
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                if (message.parameters.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF1A1A1A), RoundedCornerShape(6.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = "参数",
+                            style = JewelTheme.defaultTextStyle.copy(
+                                color = Color.LightGray,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                        SelectionContainer {
+                            Column {
+                                message.parameters.forEach { (key, value) ->
+                                    Text(
+                                        text = "$key: $value",
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = Color.White,
+                                            fontSize = 11.sp
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+                
+                if (message.result != null) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (message.result == "成功" || message.result.startsWith("Success")) Color(0xFF1A2A1A) else Color(0xFF2A1A1A),
+                                RoundedCornerShape(6.dp)
+                            )
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = "结果",
+                            style = JewelTheme.defaultTextStyle.copy(
+                                color = Color.LightGray,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                        SelectionContainer {
+                            Text(
+                                text = message.result,
+                                style = JewelTheme.defaultTextStyle.copy(
+                                    color = if (message.result == "成功" || message.result.startsWith("Success")) Color(0xFF4CAF50) else Color(0xFFF44336),
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                    }
+                }
+                
+                Text(
+                    text = message.timestamp.format(DateTimeFormatter.ofPattern("HH:mm")),
+                    style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray, fontSize = 10.sp),
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .padding(top = 4.dp)
+                )
+            }
         }
     }
 }
@@ -1099,3 +975,68 @@ data class TokenUsageMessage(
     val totalTokens: Int,
     override val timestamp: LocalDateTime
 ) : ChatMessage(id, "", timestamp)
+
+fun ChatStateService.MessageState.toChatMessage(): ChatMessage {
+    val dateTime = if (timestamp.isNotEmpty()) timestamp.toLocalDateTime() else LocalDateTime.now()
+    return when (type) {
+        "user" -> UserMessage(id, content, dateTime)
+        "ai" -> AiMessage(id, content, dateTime, isGenerating)
+        "tool" -> ToolCallMessage(
+            id = id,
+            toolName = toolName,
+            parameters = parameters.mapValues { it.value as Any },
+            timestamp = dateTime,
+            isExecuting = isExecuting,
+            result = result
+        )
+        "token" -> TokenUsageMessage(
+            id = id,
+            inputTokens = inputTokens,
+            outputTokens = outputTokens,
+            totalTokens = totalTokens,
+            timestamp = dateTime
+        )
+        else -> UserMessage(id, content, dateTime)
+    }
+}
+
+fun ChatMessage.toMessageState(): ChatStateService.MessageState {
+    return when (this) {
+        is UserMessage -> ChatStateService.MessageState(
+            id = id,
+            type = "user",
+            content = content,
+            timestamp = timestamp.toStateString()
+        )
+        is AiMessage -> ChatStateService.MessageState(
+            id = id,
+            type = "ai",
+            content = content,
+            timestamp = timestamp.toStateString(),
+            isGenerating = isGenerating
+        )
+        is ToolCallMessage -> ChatStateService.MessageState(
+            id = id,
+            type = "tool",
+            timestamp = timestamp.toStateString(),
+            toolName = toolName,
+            parameters = parameters.mapValues { it.toString() },
+            isExecuting = isExecuting,
+            result = result
+        )
+        is TokenUsageMessage -> ChatStateService.MessageState(
+            id = id,
+            type = "token",
+            timestamp = timestamp.toStateString(),
+            inputTokens = inputTokens,
+            outputTokens = outputTokens,
+            totalTokens = totalTokens
+        )
+        else -> ChatStateService.MessageState(
+            id = id,
+            type = "user",
+            content = content,
+            timestamp = timestamp.toStateString()
+        )
+    }
+}
