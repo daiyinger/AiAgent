@@ -40,6 +40,64 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import com.example.aiagent.service.LogService
 
+// Diff 结果数据类
+data class DiffLine(
+    val lineNumber: Int,
+    val content: String,
+    val type: DiffType
+)
+
+// Diff 类型枚举
+enum class DiffType {
+    ADD,    // 新增行
+    DELETE, // 删除行
+    KEEP    // 保持不变的行
+}
+
+// 简单的 Diff 算法实现
+fun computeDiff(oldText: String, newText: String): List<DiffLine> {
+    val oldLines = oldText.lines()
+    val newLines = newText.lines()
+    val result = mutableListOf<DiffLine>()
+    
+    var i = 0 // 旧文本行索引
+    var j = 0 // 新文本行索引
+    
+    while (i < oldLines.size || j < newLines.size) {
+        when {
+            i >= oldLines.size -> {
+                // 旧文本已遍历完，新文本剩余行都是新增
+                for (k in j until newLines.size) {
+                    result.add(DiffLine(k + 1, newLines[k], DiffType.ADD))
+                }
+                j = newLines.size
+            }
+            j >= newLines.size -> {
+                // 新文本已遍历完，旧文本剩余行都是删除
+                for (k in i until oldLines.size) {
+                    result.add(DiffLine(k + 1, oldLines[k], DiffType.DELETE))
+                }
+                i = oldLines.size
+            }
+            oldLines[i] == newLines[j] -> {
+                // 行内容相同，保持不变
+                result.add(DiffLine(i + 1, oldLines[i], DiffType.KEEP))
+                i++
+                j++
+            }
+            else -> {
+                // 行内容不同，标记为删除和新增
+                result.add(DiffLine(i + 1, oldLines[i], DiffType.DELETE))
+                result.add(DiffLine(j + 1, newLines[j], DiffType.ADD))
+                i++
+                j++
+            }
+        }
+    }
+    
+    return result
+}
+
 private fun log(message: String) {
     LogService.log(message)
 }
@@ -968,22 +1026,145 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                             fontSize = 13.sp
                         )
                     )
+                    // 处理文件名和行数变化的显示
                     if (fileName != null) {
-                        Text(
-                            text = fileName,
-                            style = JewelTheme.defaultTextStyle.copy(
-                                color = Color.LightGray,
-                                fontSize = 11.sp
-                            ),
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                        )
+                        // 当有文件名时
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = fileName,
+                                style = JewelTheme.defaultTextStyle.copy(
+                                    color = Color.LightGray,
+                                    fontSize = 11.sp
+                                ),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            // 显示文件修改的行数变化
+                            if ((message.toolName == "editFile" || message.toolName == "edit_file") && !message.isExecuting) {
+                                val oldText = message.parameters["old_text"] as? String
+                                val newText = message.parameters["new_text"] as? String
+                                if (oldText != null && newText != null) {
+                                    val diffLines = computeDiff(oldText, newText)
+                                    val addCount = diffLines.count { it.type == DiffType.ADD }
+                                    val deleteCount = diffLines.count { it.type == DiffType.DELETE }
+                                    
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        if (addCount > 0) {
+                                            Text(
+                                                text = "+${addCount}",
+                                                style = JewelTheme.defaultTextStyle.copy(
+                                                    color = Color(0xFF4CAF50),
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            )
+                                        }
+                                        if (addCount > 0 && deleteCount > 0) {
+                                            Text(
+                                                text = " ",
+                                                style = JewelTheme.defaultTextStyle.copy(
+                                                    fontSize = 11.sp
+                                                )
+                                            )
+                                        }
+                                        if (deleteCount > 0) {
+                                            Text(
+                                                text = "-${deleteCount}",
+                                                style = JewelTheme.defaultTextStyle.copy(
+                                                    color = Color(0xFFF44336),
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            )
+                                        }
+                                        if (addCount == 0 && deleteCount == 0) {
+                                            Text(
+                                                text = "0",
+                                                style = JewelTheme.defaultTextStyle.copy(
+                                                    color = Color.LightGray,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if ((message.toolName == "editFile" || message.toolName == "edit_file") && !message.isExecuting) {
+                        // 当没有文件名时，行数变化占满剩余空间
+                        val oldText = message.parameters["old_text"] as? String
+                        val newText = message.parameters["new_text"] as? String
+                        if (oldText != null && newText != null) {
+                            val diffLines = computeDiff(oldText, newText)
+                            val addCount = diffLines.count { it.type == DiffType.ADD }
+                            val deleteCount = diffLines.count { it.type == DiffType.DELETE }
+                            
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                if (addCount > 0) {
+                                    Text(
+                                        text = "+${addCount}",
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = Color(0xFF4CAF50),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    )
+                                }
+                                if (addCount > 0 && deleteCount > 0) {
+                                    Text(
+                                        text = " ",
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            fontSize = 11.sp
+                                        )
+                                    )
+                                }
+                                if (deleteCount > 0) {
+                                    Text(
+                                        text = "-${deleteCount}",
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = Color(0xFFF44336),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    )
+                                }
+                                if (addCount == 0 && deleteCount == 0) {
+                                    Text(
+                                        text = "0",
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = Color.LightGray,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    Text(
+                        text = " ", // 添加一个空格，与前面的内容保持间距
+                        style = JewelTheme.defaultTextStyle.copy(
+                            fontSize = 11.sp
+                        )
+                    )
                     Text(
                         text = statusText,
                         style = JewelTheme.defaultTextStyle.copy(
@@ -1115,6 +1296,92 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                         LaunchedEffect(message.output) {
                             if (outputLineList.isNotEmpty()) {
                                 outputScrollState.scrollToItem(0)
+                            }
+                        }
+                    }
+                }
+                
+                // 对于 editFile 工具，显示文件修改的差异
+                if (message.toolName == "editFile" || message.toolName == "edit_file") {
+                    val oldText = message.parameters["old_text"] as? String
+                    val newText = message.parameters["new_text"] as? String
+                    if (oldText != null && newText != null) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF1A1A1A), RoundedCornerShape(6.dp))
+                        ) {
+                            Text(
+                                text = "文件修改差异",
+                                style = JewelTheme.defaultTextStyle.copy(
+                                    color = Color.LightGray,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                modifier = Modifier.padding(8.dp)
+                            )
+                            val diffScrollState = rememberLazyListState()
+                            val diffLines = remember(oldText, newText) {
+                                computeDiff(oldText, newText)
+                            }
+                            
+                            LazyColumn(
+                                state = diffScrollState,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 200.dp)
+                                    .padding(8.dp)
+                            ) {
+                                items(diffLines.size) { index ->
+                                    val diffLine = diffLines[index]
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // 显示差异类型图标
+                                        Text(
+                                            text = when (diffLine.type) {
+                                                DiffType.ADD -> "+"
+                                                DiffType.DELETE -> "-"
+                                                DiffType.KEEP -> " "
+                                            },
+                                            style = JewelTheme.defaultTextStyle.copy(
+                                                color = when (diffLine.type) {
+                                                    DiffType.ADD -> Color(0xFF4CAF50)
+                                                    DiffType.DELETE -> Color(0xFFF44336)
+                                                    DiffType.KEEP -> Color.LightGray
+                                                },
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp
+                                            ),
+                                            modifier = Modifier.width(20.dp)
+                                        )
+                                        // 显示行号
+                                        Text(
+                                            text = "${diffLine.lineNumber}.",
+                                            style = JewelTheme.defaultTextStyle.copy(
+                                                color = Color.LightGray,
+                                                fontSize = 10.sp
+                                            ),
+                                            modifier = Modifier.width(30.dp)
+                                        )
+                                        // 显示行内容
+                                        Text(
+                                            text = diffLine.content,
+                                            style = JewelTheme.defaultTextStyle.copy(
+                                                color = when (diffLine.type) {
+                                                    DiffType.ADD -> Color(0xFF4CAF50)
+                                                    DiffType.DELETE -> Color(0xFFF44336)
+                                                    DiffType.KEEP -> Color.White
+                                                },
+                                                fontSize = 11.sp
+                                            ),
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

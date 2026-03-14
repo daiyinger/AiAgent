@@ -151,9 +151,9 @@ class EditFileTool : Tool(
             
             val lineChange = newLineCount - oldLineCount
             val lineChangeText = when {
-                lineChange > 0 -> "+$lineChange 行"
-                lineChange < 0 -> "-$lineChange 行"
-                else -> "0 行"
+                lineChange > 0 -> "+$lineChange "
+                lineChange < 0 -> "-$lineChange "
+                else -> "0 "
             }
             
             ToolResult.Success(
