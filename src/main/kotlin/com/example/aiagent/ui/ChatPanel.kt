@@ -308,6 +308,7 @@ fun ChatPanel() {
                                                     if (existingIndex >= 0) {
                                                         newMessages[existingIndex] = toolCall
                                                         log("更新工具调用消息: ${toolCall.toolName}")
+                                                        chatStateService.updateToolCallMessage(toolCall.id, toolCall.isExecuting, toolCall.result)
                                                     } else {
                                                         newMessages.add(toolCall)
                                                         log("添加新工具调用消息: ${toolCall.toolName}")
@@ -423,72 +424,108 @@ fun ChatPanel() {
         ) {
             Column(
                 modifier = Modifier
-                    .width(400.dp)
-                    .height(400.dp)
+                    .width(320.dp)
+                    .height(500.dp)
                     .background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp))
-                    .padding(16.dp)
+                    .padding(horizontal = 12.dp, vertical = 16.dp)
             ) {
+                // 标题栏
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "会话管理",
-                        style = JewelTheme.defaultTextStyle.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                        "Recent Chats",
+                        style = JewelTheme.defaultTextStyle.copy(
+                            fontWeight = FontWeight.Bold, 
+                            color = Color.White,
+                            fontSize = 16.sp
+                        )
                     )
-                    OutlinedButton(
-                        onClick = { isSessionManagerOpen = false }
-                    ) {
-                        Text("关闭")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // 新建会话按钮
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clickable {
+                                    val newSession = chatStateService.createNewSession()
+                                    sessions.value = chatStateService.sessions.toMutableList()
+                                    currentSessionIndex = sessions.value.size - 1
+                                    chatStateService.currentSessionIndex = currentSessionIndex
+                                    messages.value = mutableListOf()
+                                    isSessionManagerOpen = false
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("+", style = JewelTheme.defaultTextStyle.copy(fontSize = 20.sp, color = Color.White))
+                        }
+                        // 关闭按钮
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clickable { isSessionManagerOpen = false },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("✕", style = JewelTheme.defaultTextStyle.copy(fontSize = 16.sp, color = Color.Gray))
+                        }
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                        .background(Color(0xFF2D2D2D))
+                // 会话列表
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(8.dp)
-                    ) {
-                        items(sessions.value) { sessionState ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(8.dp)
-                                    .background(
-                                        if (sessionState.id == currentSessionState.id) Color(0xFF007ACC) else Color.Transparent
-                                    )
-                                    .border(
-                                        1.dp,
-                                        if (sessionState.id == currentSessionState.id) Color(0xFF007ACC) else Color.Transparent,
-                                        RoundedCornerShape(4.dp)
-                                    )
-                                    .padding(8.dp)
-                                    .clickable {
-                                        val newIndex = sessions.value.indexOf(sessionState)
-                                        currentSessionIndex = newIndex
-                                        chatStateService.currentSessionIndex = newIndex
-                                        messages.value = sessionState.messages.map { it.toChatMessage() }.toMutableList()
-                                        isSessionManagerOpen = false
-                                    }
-                            ) {
-                                Text(
-                                    sessionState.title,
-                                    style = JewelTheme.defaultTextStyle.copy(
-                                        color = if (sessionState.id == currentSessionState.id) Color.White else Color.White
-                                    ),
-                                    modifier = Modifier.weight(1f)
+                    items(sessions.value.sortedByDescending { it.timestamp }) { sessionState ->
+                        val isActive = sessionState.id == currentSessionState.id
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (isActive) Color(0xFF2D5A8A) else Color.Transparent,
+                                    RoundedCornerShape(4.dp)
                                 )
+                                .padding(horizontal = 8.dp, vertical = 10.dp)
+                                .clickable {
+                                    val newIndex = sessions.value.indexOf(sessionState)
+                                    currentSessionIndex = newIndex
+                                    chatStateService.currentSessionIndex = newIndex
+                                    messages.value = sessionState.messages.map { it.toChatMessage() }.toMutableList()
+                                    isSessionManagerOpen = false
+                                },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                sessionState.title,
+                                style = JewelTheme.defaultTextStyle.copy(
+                                    color = Color.White,
+                                    fontSize = 14.sp
+                                ),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (isActive) {
+                                    Text(
+                                        "Active",
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = Color(0xFF4CAF50),
+                                            fontSize = 12.sp
+                                        )
+                                    )
+                                }
                                 Box(
                                     modifier = Modifier
-                                        .size(24.dp)
+                                        .size(20.dp)
                                         .clickable {
                                             if (sessions.value.size > 1) {
                                                 val index = sessions.value.indexOf(sessionState)
@@ -501,32 +538,17 @@ fun ChatPanel() {
                                                     }
                                                 }
                                             }
-                                        }
+                                        },
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = "🗑️",
-                                        style = JewelTheme.defaultTextStyle
+                                        text = "🗑",
+                                        style = JewelTheme.defaultTextStyle.copy(fontSize = 12.sp)
                                     )
                                 }
                             }
                         }
                     }
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                OutlinedButton(
-                    onClick = {
-                        val newSession = chatStateService.createNewSession()
-                        sessions.value = chatStateService.sessions.toMutableList()
-                        currentSessionIndex = sessions.value.size - 1
-                        chatStateService.currentSessionIndex = currentSessionIndex
-                        messages.value = mutableListOf()
-                        isSessionManagerOpen = false
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("新建会话")
                 }
             }
         }
@@ -688,7 +710,7 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
     ) {
         Column(
             modifier = Modifier
-                .widthIn(max = 400.dp)
+                .fillMaxWidth(0.9f)
                 .background(
                     when {
                         message.isExecuting -> Color(0xFF2D3748)

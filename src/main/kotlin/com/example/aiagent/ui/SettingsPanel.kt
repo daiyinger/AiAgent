@@ -96,23 +96,47 @@ fun SettingsPanel(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "⚙️ ",
-                        style = JewelTheme.defaultTextStyle.copy(fontWeight = FontWeight.Bold, color = Color.White),
-                        modifier = Modifier.clickable {
-                            val currentTime = System.currentTimeMillis()
-                            if (currentTime - lastSettingsClickTime < 500) {
-                                settingsClickCount++
-                                if (settingsClickCount >= 2) {
-                                    settings.enableLogging = !settings.enableLogging
+                    Box {
+                        Text(
+                            text = "⚙️ ",
+                            style = JewelTheme.defaultTextStyle.copy(fontWeight = FontWeight.Bold, color = Color.White),
+                            modifier = Modifier.clickable {
+                                val currentTime = System.currentTimeMillis()
+                                if (currentTime - lastSettingsClickTime < 500) {
+                                    settingsClickCount++
+                                    if (settingsClickCount >= 2) {
+                                        settings.enableLogging = !settings.enableLogging
+                                        showLogToast = if (settings.enableLogging) "日志已开启" else "日志已关闭"
+                                        settingsClickCount = 0
+                                    }
+                                } else {
                                     settingsClickCount = 0
                                 }
-                            } else {
-                                settingsClickCount = 0
+                                lastSettingsClickTime = currentTime
                             }
-                            lastSettingsClickTime = currentTime
+                        )
+                        
+                        if (showLogToast != null) {
+                            LaunchedEffect(showLogToast) {
+                                kotlinx.coroutines.delay(2000)
+                                showLogToast = null
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .absoluteOffset(y = 24.dp)
+                                    .background(Color(0xFF4CAF50), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = showLogToast!!,
+                                    style = JewelTheme.defaultTextStyle.copy(
+                                        color = Color.White,
+                                        fontSize = 12.sp
+                                    )
+                                )
+                            }
                         }
-                    )
+                    }
                     Text(
                         "模型Provider配置",
                         style = JewelTheme.defaultTextStyle.copy(fontWeight = FontWeight.Bold, color = Color.White)

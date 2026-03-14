@@ -16,7 +16,8 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
     data class SessionState(
         var id: String = "",
         var title: String = "新会话",
-        var messages: MutableList<MessageState> = mutableListOf()
+        var messages: MutableList<MessageState> = mutableListOf(),
+        var timestamp: Long = System.currentTimeMillis()
     )
     
     data class MessageState(
@@ -81,11 +82,10 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
     }
     
     fun createNewSession(): SessionState {
-        val formatter = DateTimeFormatter.ofPattern("MM-dd HH:mm")
-        val timestamp = LocalDateTime.now().format(formatter)
         val newSession = SessionState(
             id = System.currentTimeMillis().toString(),
-            title = "会话 $timestamp"
+            title = "New Chat",
+            timestamp = System.currentTimeMillis()
         )
         state.sessions.add(newSession)
         return newSession
@@ -138,6 +138,17 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
         val lastMessage = currentSession?.messages?.lastOrNull()
         if (lastMessage != null && lastMessage.type == "ai") {
             lastMessage.isGenerating = isGenerating
+        }
+    }
+    
+    fun updateToolCallMessage(messageId: String, isExecuting: Boolean, result: String?) {
+        val currentSessionState = currentSession
+        if (currentSessionState != null) {
+            val msgIndex = currentSessionState.messages.indexOfFirst { it.id == messageId && it.type == "tool" }
+            if (msgIndex >= 0) {
+                currentSessionState.messages[msgIndex].isExecuting = isExecuting
+                currentSessionState.messages[msgIndex].result = result
+            }
         }
     }
     
