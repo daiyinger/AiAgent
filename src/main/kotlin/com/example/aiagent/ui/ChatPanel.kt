@@ -424,9 +424,14 @@ fun ChatPanel() {
                                                     val existingIndex = newMessages.indexOfFirst { it is ToolCallMessage && it.id == toolCall.id }
                                                     
                                                     if (existingIndex >= 0) {
-                                                        newMessages[existingIndex] = toolCall
+                                                        // 保留之前的输出内容
+                                                        val existingToolCall = newMessages[existingIndex] as ToolCallMessage
+                                                        val updatedToolCall = toolCall.copy(
+                                                            output = existingToolCall.output
+                                                        )
+                                                        newMessages[existingIndex] = updatedToolCall
                                                         log("更新工具调用消息: ${toolCall.toolName}")
-                                                        chatStateService.updateToolCallMessage(toolCall.id, toolCall.isExecuting, toolCall.result, toolCall.output)
+                                                        chatStateService.updateToolCallMessage(updatedToolCall.id, updatedToolCall.isExecuting, updatedToolCall.result, updatedToolCall.output)
                                                     } else {
                                                         // 查找最后一个 AI 消息的索引，在它之前添加工具调用消息
                                                         val aiMessageIndex = newMessages.indexOfLast { it is AiMessage }
@@ -453,9 +458,9 @@ fun ChatPanel() {
                                                 log("收到工具输出: $toolName - ${output.take(50)}...")
                                                 CoroutineScope(Dispatchers.Main).launch {
                                                     val newMessages = messages.value.toMutableList()
-                                                    // 查找正在执行的同名工具调用消息
+                                                    // 查找最近的同名工具调用消息，不限制isExecuting状态
                                                     val toolCallIndex = newMessages.indexOfLast { 
-                                                        it is ToolCallMessage && it.toolName == toolName && it.isExecuting
+                                                        it is ToolCallMessage && it.toolName == toolName
                                                     }
                                                     
                                                     if (toolCallIndex >= 0) {
@@ -472,8 +477,8 @@ fun ChatPanel() {
                                                             updatedToolCall.output
                                                         )
                                                     } else {
-                                                        // 如果没有正在执行的，记录日志
-                                                        log("未找到正在执行的工具调用: $toolName")
+                                                        // 如果没有找到，记录日志
+                                                        log("未找到工具调用: $toolName")
                                                     }
                                                 }
                                             }
@@ -788,7 +793,7 @@ private fun UserMessageItem(message: UserMessage) {
             }
             Text(
                 text = message.timestamp.format(DateTimeFormatter.ofPattern("HH:mm")),
-                style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray),
+                style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp),
                 modifier = Modifier.align(Alignment.End)
             )
         }
@@ -824,16 +829,21 @@ private fun AiMessageItem(message: AiMessage) {
                         style = JewelTheme.defaultTextStyle.copy(color = Color.Gray, fontSize = 12.sp)
                     )
                 }
-                message.tokenUsage?.let {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    message.tokenUsage?.let {
+                        Text(
+                            text = "Tokens: in ${it.first}/out ${it.second}",
+                            style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp)
+                        )
+                    }
                     Text(
-                        text = "Tokens: ${it.first}/${it.second}",
+                        text = message.timestamp.format(DateTimeFormatter.ofPattern("HH:mm")),
                         style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp)
                     )
                 }
-                Text(
-                    text = message.timestamp.format(DateTimeFormatter.ofPattern("HH:mm")),
-                    style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray, fontSize = 12.sp)
-                )
             }
         }
     }

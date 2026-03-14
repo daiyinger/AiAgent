@@ -382,13 +382,18 @@ class LangChainAgentService(private val project: Project) {
                     val toolCallKey = "$toolName-${paramsStr.take(50)}" // 使用工具名和参数的前50个字符作为键
                     val toolCallId = toolCallIds.getOrPut(toolCallKey) { System.currentTimeMillis().toString() }
                     
+                    // 查找是否已经存在该工具调用消息，以保留之前的输出
+                    var existingOutput = ""
+                    // 这里暂时无法直接访问 UI 中的消息列表，所以我们依赖 chatStateService 来保存输出
+                    
                     val toolCallMessage = ToolCallMessage(
                         id = toolCallId,
                         toolName = toolName,
                         parameters = parameters,
                         timestamp = LocalDateTime.now(),
                         isExecuting = status == "执行中..." || status.startsWith("进行中:"),
-                        result = if (status == "成功") "成功" else if (status.startsWith("失败:")) status.substring(3) else null
+                        result = if (status == "成功") "成功" else if (status.startsWith("失败:")) status.substring(3) else null,
+                        output = existingOutput
                     )
                     onToolCall(toolCallMessage)
                     
