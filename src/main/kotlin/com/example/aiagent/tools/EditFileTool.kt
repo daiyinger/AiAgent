@@ -57,6 +57,8 @@ class EditFileTool : Tool(
             }
             
             var newContent: String
+            var oldLineCount = 0
+            var newLineCount = 0
             
             if (document != null) {
                 // 文件存在，检查并替换内容
@@ -65,6 +67,10 @@ class EditFileTool : Tool(
                 if (!fileContent.contains(oldText)) {
                     return ToolResult.Error("Old text not found in file: $path")
                 }
+                
+                // 计算旧文本和新文本的行数
+                oldLineCount = oldText.lines().size
+                newLineCount = newText.lines().size
                 
                 newContent = fileContent.replace(oldText, newText)
                 
@@ -76,6 +82,10 @@ class EditFileTool : Tool(
             } else {
                 // 文件不存在，创建新文件
                 println("EditFileTool - File not found, creating new file: $path")
+                
+                // 计算新文本的行数（旧行数为0）
+                oldLineCount = 0
+                newLineCount = newText.lines().size
                 
                 // 在WriteCommandAction中执行文件和目录创建
                 var createdVirtualFile: VirtualFile? = null
@@ -139,13 +149,23 @@ class EditFileTool : Tool(
             
             println("EditFileTool - Virtual file: ${virtualFile?.path}")
             
+            val lineChange = newLineCount - oldLineCount
+            val lineChangeText = when {
+                lineChange > 0 -> "+$lineChange 行"
+                lineChange < 0 -> "-$lineChange 行"
+                else -> "0 行"
+            }
+            
             ToolResult.Success(
                 mapOf(
                     "path" to path,
-                    "message" to "File edited successfully",
+                    "message" to "File edited successfully ($lineChangeText)",
                     "changes" to mapOf(
                         "old_text_length" to oldText.length,
-                        "new_text_length" to newText.length
+                        "new_text_length" to newText.length,
+                        "old_line_count" to oldLineCount,
+                        "new_line_count" to newLineCount,
+                        "line_change" to lineChange
                     )
                 )
             )

@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.Popup
 import com.example.aiagent.service.ChatStateService
 import com.example.aiagent.service.ChatStateService.MessageState
 import com.example.aiagent.service.ChatStateService.SessionState
@@ -116,15 +117,106 @@ fun ChatPanel() {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // 历史会话按钮
-                IconButton(
-                    onClick = { isSessionManagerOpen = true },
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Text(
-                        text = "☰",
-                        style = JewelTheme.defaultTextStyle.copy(fontSize = 16.sp)
-                    )
+                // 历史会话下拉菜单
+                Box {
+                    var expanded by remember { mutableStateOf(false) }
+                    
+                    IconButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Text(
+                            text = "💬",
+                            style = JewelTheme.defaultTextStyle.copy(fontSize = 14.sp)
+                        )
+                    }
+                    
+                    // 自定义下拉菜单
+                    if (expanded) {
+                        Popup(
+                            alignment = Alignment.TopEnd,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .width(240.dp)
+                                    .heightIn(max = 350.dp)
+                                    .background(Color(0xFF2D2D2D), RoundedCornerShape(6.dp))
+                                    .padding(4.dp)
+                            ) {
+                                // 新建会话按钮
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            val newSession = chatStateService.createNewSession()
+                                            sessions.value = chatStateService.sessions.toMutableList()
+                                            currentSessionIndex = sessions.value.size - 1
+                                            chatStateService.currentSessionIndex = currentSessionIndex
+                                            messages.value = mutableListOf()
+                                            expanded = false
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "+",
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = Color(0xFF4CAF50),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp
+                                        ),
+                                        modifier = Modifier.width(20.dp)
+                                    )
+                                    Text(
+                                        "New Chat",
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = Color.White,
+                                            fontSize = 13.sp
+                                        )
+                                    )
+                                }
+                                
+                                // 历史会话列表
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    items(sessions.value.sortedByDescending { it.timestamp }) { sessionState ->
+                                        val isActive = sessionState.id == currentSessionState.id
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(
+                                                    if (isActive) Color(0xFF3D5A7A) else Color.Transparent,
+                                                    RoundedCornerShape(4.dp)
+                                                )
+                                                .clickable {
+                                                    val newIndex = sessions.value.indexOf(sessionState)
+                                                    currentSessionIndex = newIndex
+                                                    chatStateService.currentSessionIndex = newIndex
+                                                    messages.value = sessionState.messages.map { it.toChatMessage() }.toMutableList()
+                                                    expanded = false
+                                                }
+                                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                sessionState.title,
+                                                style = JewelTheme.defaultTextStyle.copy(
+                                                    color = if (isActive) Color(0xFF4CAF50) else Color.White,
+                                                    fontSize = 12.sp
+                                                ),
+                                                maxLines = 1,
+                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 
                 // 设置按钮
@@ -448,10 +540,10 @@ fun ChatPanel() {
         ) {
             Column(
                 modifier = Modifier
-                    .width(320.dp)
-                    .height(500.dp)
-                    .background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 16.dp)
+                    .width(300.dp)
+                    .height(450.dp)
+                    .background(Color(0xFF1E1E1E), RoundedCornerShape(12.dp))
+                    .padding(16.dp)
             ) {
                 // 标题栏
                 Row(
@@ -464,14 +556,14 @@ fun ChatPanel() {
                         style = JewelTheme.defaultTextStyle.copy(
                             fontWeight = FontWeight.Bold, 
                             color = Color.White,
-                            fontSize = 16.sp
+                            fontSize = 15.sp
                         )
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         // 新建会话按钮
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
+                                .size(24.dp)
                                 .clickable {
                                     val newSession = chatStateService.createNewSession()
                                     sessions.value = chatStateService.sessions.toMutableList()
@@ -482,16 +574,16 @@ fun ChatPanel() {
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("+", style = JewelTheme.defaultTextStyle.copy(fontSize = 20.sp, color = Color.White))
+                            Text("+", style = JewelTheme.defaultTextStyle.copy(fontSize = 18.sp, color = Color(0xFF4CAF50)))
                         }
                         // 关闭按钮
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
+                                .size(24.dp)
                                 .clickable { isSessionManagerOpen = false },
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("✕", style = JewelTheme.defaultTextStyle.copy(fontSize = 16.sp, color = Color.Gray))
+                            Text("✕", style = JewelTheme.defaultTextStyle.copy(fontSize = 14.sp, color = Color.Gray))
                         }
                     }
                 }
@@ -501,7 +593,7 @@ fun ChatPanel() {
                 // 会话列表
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    verticalArrangement = Arrangement.spacedBy(1.dp)
                 ) {
                     items(sessions.value.sortedByDescending { it.timestamp }) { sessionState ->
                         val isActive = sessionState.id == currentSessionState.id
@@ -510,9 +602,9 @@ fun ChatPanel() {
                                 .fillMaxWidth()
                                 .background(
                                     if (isActive) Color(0xFF2D5A8A) else Color.Transparent,
-                                    RoundedCornerShape(4.dp)
+                                    RoundedCornerShape(6.dp)
                                 )
-                                .padding(horizontal = 8.dp, vertical = 10.dp)
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
                                 .clickable {
                                     val newIndex = sessions.value.indexOf(sessionState)
                                     currentSessionIndex = newIndex
@@ -526,8 +618,8 @@ fun ChatPanel() {
                             Text(
                                 sessionState.title,
                                 style = JewelTheme.defaultTextStyle.copy(
-                                    color = Color.White,
-                                    fontSize = 14.sp
+                                    color = if (isActive) Color(0xFF4CAF50) else Color.White,
+                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
                                 ),
                                 maxLines = 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -535,21 +627,21 @@ fun ChatPanel() {
                             )
                             
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 if (isActive) {
                                     Text(
-                                        "Active",
+                                        "●",
                                         style = JewelTheme.defaultTextStyle.copy(
                                             color = Color(0xFF4CAF50),
-                                            fontSize = 12.sp
+                                            fontSize = 8.sp
                                         )
                                     )
                                 }
                                 Box(
                                     modifier = Modifier
-                                        .size(20.dp)
+                                        .size(18.dp)
                                         .clickable {
                                             if (sessions.value.size > 1) {
                                                 val index = sessions.value.indexOf(sessionState)
@@ -567,7 +659,7 @@ fun ChatPanel() {
                                 ) {
                                     Text(
                                         text = "🗑",
-                                        style = JewelTheme.defaultTextStyle.copy(fontSize = 12.sp)
+                                        style = JewelTheme.defaultTextStyle.copy(fontSize = 11.sp)
                                     )
                                 }
                             }
@@ -710,6 +802,7 @@ private fun AiMessageItem(message: AiMessage) {
 @Composable
 private fun ToolCallMessageItem(message: ToolCallMessage) {
     var isExpanded by remember { mutableStateOf(false) }
+    var outputLines by remember { mutableStateOf(5) }
     
     val fileName: String? = (message.parameters["filePath"] 
         ?: message.parameters["fileName"] 
@@ -757,6 +850,7 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
+                    modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -777,12 +871,11 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                         )
                     )
                     if (fileName != null) {
-                        val displayFileName = if (fileName.length > 30) fileName.substring(0, 30) + "..." else fileName
                         Text(
-                            text = displayFileName,
+                            text = fileName,
                             style = JewelTheme.defaultTextStyle.copy(
                                 color = Color.LightGray,
-                                fontSize = 12.sp
+                                fontSize = 11.sp
                             ),
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
@@ -797,7 +890,7 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                         text = statusText,
                         style = JewelTheme.defaultTextStyle.copy(
                             color = statusColor,
-                            fontSize = 12.sp
+                            fontSize = 11.sp
                         )
                     )
                     Text(
@@ -883,17 +976,68 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(Color(0xFF1A1A1A), RoundedCornerShape(6.dp))
-                            .padding(8.dp)
                     ) {
-                        Text(
-                            text = "输出",
-                            style = JewelTheme.defaultTextStyle.copy(
-                                color = Color.LightGray,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "输出",
+                                style = JewelTheme.defaultTextStyle.copy(
+                                    color = Color.LightGray,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                modifier = Modifier.padding(8.dp)
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(end = 8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clickable {
+                                            if (outputLines > 1) outputLines--
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "−",
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = Color.LightGray,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
+                                Text(
+                                    text = "$outputLines",
+                                    style = JewelTheme.defaultTextStyle.copy(
+                                        color = Color.LightGray,
+                                        fontSize = 10.sp
+                                    )
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clickable {
+                                            if (outputLines < 20) outputLines++
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "+",
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = Color.LightGray,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
+                            }
+                        }
                         SelectionContainer {
                             Text(
                                 text = message.output,
@@ -901,8 +1045,9 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                                     color = Color.White,
                                     fontSize = 11.sp
                                 ),
-                                maxLines = 20,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                maxLines = outputLines,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(8.dp)
                             )
                         }
                     }
