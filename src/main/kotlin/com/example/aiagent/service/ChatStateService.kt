@@ -129,6 +129,16 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
         }
     }
     
+    fun addMessageToCurrentSessionAtPosition(message: MessageState, position: Int) {
+        currentSession?.let {
+            if (position >= 0 && position <= it.messages.size) {
+                it.messages.add(position, message)
+            } else {
+                it.messages.add(message)
+            }
+        }
+    }
+    
     fun updateLastAiMessageContent(content: String) {
         // 查找最后一条 AI 消息，而不是最后一条消息
         val lastAiMessage = currentSession?.messages?.lastOrNull { it.type == "ai" }

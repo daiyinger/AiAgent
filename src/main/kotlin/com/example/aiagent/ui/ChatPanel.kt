@@ -438,12 +438,14 @@ fun ChatPanel() {
                                                         if (aiMessageIndex >= 0) {
                                                             // 在 AI 消息之前添加工具调用消息
                                                             newMessages.add(aiMessageIndex, toolCall)
+                                                            // 在 sessionState.messages 中也添加到相同位置
+                                                            chatStateService.addMessageToCurrentSessionAtPosition(toolCall.toMessageState(), aiMessageIndex)
                                                         } else {
                                                             // 如果没有 AI 消息，添加到末尾
                                                             newMessages.add(toolCall)
+                                                            chatStateService.addMessageToCurrentSession(toolCall.toMessageState())
                                                         }
                                                         log("添加新工具调用消息: ${toolCall.toolName}")
-                                                        chatStateService.addMessageToCurrentSession(toolCall.toMessageState())
                                                     }
                                                     
                                                     messages.value = newMessages
@@ -892,7 +894,6 @@ private fun AiMessageItem(message: AiMessage) {
 @Composable
 private fun ToolCallMessageItem(message: ToolCallMessage) {
     var isExpanded by remember { mutableStateOf(message.output.isNotEmpty() && message.toolName == "compileProject") }
-    var outputLines by remember { mutableStateOf(5) }
     
     // 当编译工具产生新输出时自动展开
     LaunchedEffect(message.output) {
@@ -1074,67 +1075,15 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                             .fillMaxWidth()
                             .background(Color(0xFF1A1A1A), RoundedCornerShape(6.dp))
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "输出",
-                                style = JewelTheme.defaultTextStyle.copy(
-                                    color = Color.LightGray,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                modifier = Modifier.padding(8.dp)
-                            )
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.padding(end = 8.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(20.dp)
-                                        .clickable {
-                                            if (outputLines > 1) outputLines--
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "−",
-                                        style = JewelTheme.defaultTextStyle.copy(
-                                            color = Color.LightGray,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    )
-                                }
-                                Text(
-                                    text = "$outputLines",
-                                    style = JewelTheme.defaultTextStyle.copy(
-                                        color = Color.LightGray,
-                                        fontSize = 10.sp
-                                    )
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .size(20.dp)
-                                        .clickable {
-                                            if (outputLines < 20) outputLines++
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "+",
-                                        style = JewelTheme.defaultTextStyle.copy(
-                                            color = Color.LightGray,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    )
-                                }
-                            }
-                        }
+                        Text(
+                            text = "输出",
+                            style = JewelTheme.defaultTextStyle.copy(
+                                color = Color.LightGray,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier.padding(8.dp)
+                        )
                         val outputScrollState = rememberLazyListState()
                         val outputLineList = remember(message.output) {
                             message.output.split("\n").filter { it.isNotBlank() }
@@ -1144,7 +1093,7 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                             state = outputScrollState,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = (outputLines * 16).dp)
+                                .heightIn(max = 200.dp)
                                 .padding(8.dp),
                             reverseLayout = true
                         ) {
