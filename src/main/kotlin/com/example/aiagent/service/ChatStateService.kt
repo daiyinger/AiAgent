@@ -116,12 +116,13 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
     
     fun addMessageToCurrentSession(message: MessageState) {
         currentSession?.messages?.add(message)
-        
+
         if (message.type == "user" && currentSession != null) {
             val session = currentSession!!
-            if (session.title.startsWith("会话 ") && message.content.isNotBlank()) {
-                val title = message.content.take(30).let { 
-                    if (message.content.length > 30) "$it..." else it 
+            // 如果标题是默认标题，则使用第一条用户消息作为标题
+            if ((session.title == "New Chat" || session.title == "新会话") && message.content.isNotBlank()) {
+                val title = message.content.take(30).let {
+                    if (message.content.length > 30) "$it..." else it
                 }
                 session.title = title
             }

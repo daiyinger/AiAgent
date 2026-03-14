@@ -391,6 +391,11 @@ class LangChainAgentService(private val project: Project) {
                         result = if (status == "成功") "成功" else if (status.startsWith("失败:")) status.substring(3) else null
                     )
                     onToolCall(toolCallMessage)
+                    
+                    // 如果工具调用完成或失败，从映射中移除，这样下次相同工具调用会创建新的框
+                    if (status == "成功" || status.startsWith("失败:")) {
+                        toolCallIds.remove(toolCallKey)
+                    }
                 }
             }
             

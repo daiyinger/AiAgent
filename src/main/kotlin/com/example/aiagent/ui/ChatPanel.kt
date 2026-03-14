@@ -209,8 +209,29 @@ fun ChatPanel() {
                                                 ),
                                                 maxLines = 1,
                                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                                modifier = Modifier.fillMaxWidth()
+                                                modifier = Modifier.weight(1f)
                                             )
+                                            IconButton(
+                                                onClick = {
+                                                    val index = sessions.value.indexOf(sessionState)
+                                                    chatStateService.removeSession(index)
+                                                    sessions.value = chatStateService.sessions.toMutableList()
+                                                    if (currentSessionIndex >= sessions.value.size) {
+                                                        currentSessionIndex = sessions.value.size - 1
+                                                        chatStateService.currentSessionIndex = currentSessionIndex
+                                                    }
+                                                    messages.value = sessions.value.getOrNull(currentSessionIndex)?.messages?.map { it.toChatMessage() }?.toMutableList() ?: mutableListOf()
+                                                },
+                                                modifier = Modifier.size(16.dp)
+                                            ) {
+                                                Text(
+                                                    text = "✕",
+                                                    style = JewelTheme.defaultTextStyle.copy(
+                                                        color = Color(0xFFE57373),
+                                                        fontSize = 12.sp
+                                                    )
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -372,21 +393,26 @@ fun ChatPanel() {
                                         val result = langChainService.sendMessage(
                                             message = originalInput,
                                             onChunk = { chunk ->
-                                                if (!isSending) return@sendMessage
+                                                // 移除 isSending 检查，因为 invokeLater 可能在 isSending 变为 false 后执行
                                                 log("收到LangChain4j消息chunk: ${chunk.take(50)}...")
                                                 currentContent += chunk
                                                 isGenerating = true
                                                 
                                                 CoroutineScope(Dispatchers.Main).launch {
                                                     val newMessages = messages.value.toMutableList()
-                                                    val updatedMessage = AiMessage(
-                                                        id = aiMessageId,
-                                                        content = currentContent,
-                                                        timestamp = aiMessageTimestamp,
-                                                        isGenerating = isGenerating
-                                                    )
-                                                    newMessages[newMessages.size - 1] = updatedMessage
-                                                    messages.value = newMessages
+                                                    // 查找AI消息的索引，而不是使用size - 1
+                                                    val aiMessageIndex = newMessages.indexOfFirst { it is AiMessage && it.id == aiMessageId }
+                                                    if (aiMessageIndex >= 0) {
+                                                        val updatedMessage = AiMessage(
+                                                            id = aiMessageId,
+                                                            content = currentContent,
+                                                            timestamp = aiMessageTimestamp,
+                                                            isGenerating = isGenerating,
+                                                            tokenUsage = tokenUsage
+                                                        )
+                                                        newMessages[aiMessageIndex] = updatedMessage
+                                                        messages.value = newMessages
+                                                    }
                                                 }
                                             },
                                             onToolCall = { toolCall ->
@@ -402,7 +428,15 @@ fun ChatPanel() {
                                                         log("更新工具调用消息: ${toolCall.toolName}")
                                                         chatStateService.updateToolCallMessage(toolCall.id, toolCall.isExecuting, toolCall.result, toolCall.output)
                                                     } else {
-                                                        newMessages.add(toolCall)
+                                                        // 查找最后一个 AI 消息的索引，在它之前添加工具调用消息
+                                                        val aiMessageIndex = newMessages.indexOfLast { it is AiMessage }
+                                                        if (aiMessageIndex >= 0) {
+                                                            // 在 AI 消息之前添加工具调用消息
+                                                            newMessages.add(aiMessageIndex, toolCall)
+                                                        } else {
+                                                            // 如果没有 AI 消息，添加到末尾
+                                                            newMessages.add(toolCall)
+                                                        }
                                                         log("添加新工具调用消息: ${toolCall.toolName}")
                                                         chatStateService.addMessageToCurrentSession(toolCall.toMessageState())
                                                     }
@@ -419,9 +453,11 @@ fun ChatPanel() {
                                                 log("收到工具输出: $toolName - ${output.take(50)}...")
                                                 CoroutineScope(Dispatchers.Main).launch {
                                                     val newMessages = messages.value.toMutableList()
-                                                    val toolCallIndex = newMessages.indexOfFirst { 
-                                                        it is ToolCallMessage && it.toolName == toolName && it.isExecuting 
+                                                    // 查找正在执行的同名工具调用消息
+                                                    val toolCallIndex = newMessages.indexOfLast { 
+                                                        it is ToolCallMessage && it.toolName == toolName && it.isExecuting
                                                     }
+                                                    
                                                     if (toolCallIndex >= 0) {
                                                         val existingToolCall = newMessages[toolCallIndex] as ToolCallMessage
                                                         val updatedToolCall = existingToolCall.copy(
@@ -435,6 +471,9 @@ fun ChatPanel() {
                                                             updatedToolCall.result,
                                                             updatedToolCall.output
                                                         )
+                                                    } else {
+                                                        // 如果没有正在执行的，记录日志
+                                                        log("未找到正在执行的工具调用: $toolName")
                                                     }
                                                 }
                                             }
@@ -448,28 +487,23 @@ fun ChatPanel() {
                                             sessions.value = chatStateService.sessions.toMutableList()
                                             
                                             val newMessages = messages.value.toMutableList()
-                                            val updatedMessage = AiMessage(
-                                                id = aiMessageId,
-                                                content = currentContent,
-                                                timestamp = aiMessageTimestamp,
-                                                isGenerating = isGenerating
-                                            )
-                                            newMessages[newMessages.size - 1] = updatedMessage
-                                            
-                                            chatStateService.updateLastAiMessageContent(currentContent)
-                                            chatStateService.setLastAiMessageGenerating(false)
-                                            
-                                            tokenUsage?.let {
-                                                val tokenMessage = TokenUsageMessage(
-                                                    id = (System.currentTimeMillis() + 3).toString(),
-                                                    inputTokens = it.first,
-                                                    outputTokens = it.second,
-                                                    totalTokens = it.first + it.second,
-                                                    timestamp = LocalDateTime.now()
+                                            // 查找AI消息的索引，而不是使用size - 1
+                                            val aiMessageIndex = newMessages.indexOfFirst { it is AiMessage && it.id == aiMessageId }
+                                            if (aiMessageIndex >= 0) {
+                                                val updatedMessage = AiMessage(
+                                                    id = aiMessageId,
+                                                    content = currentContent,
+                                                    timestamp = aiMessageTimestamp,
+                                                    isGenerating = isGenerating,
+                                                    tokenUsage = tokenUsage
                                                 )
-                                                newMessages.add(tokenMessage)
-                                                chatStateService.addMessageToCurrentSession(tokenMessage.toMessageState())
+                                                newMessages[aiMessageIndex] = updatedMessage
+                                                
+                                                chatStateService.updateLastAiMessageContent(currentContent)
+                                                chatStateService.setLastAiMessageGenerating(false)
                                             }
+                                            
+                                            // 不再创建单独的 TokenUsageMessage，而是在 AI 消息末尾添加 token 统计
                                             
                                             messages.value = newMessages
                                             
@@ -790,6 +824,12 @@ private fun AiMessageItem(message: AiMessage) {
                         style = JewelTheme.defaultTextStyle.copy(color = Color.Gray, fontSize = 12.sp)
                     )
                 }
+                message.tokenUsage?.let {
+                    Text(
+                        text = "Tokens: ${it.first}/${it.second}",
+                        style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp)
+                    )
+                }
                 Text(
                     text = message.timestamp.format(DateTimeFormatter.ofPattern("HH:mm")),
                     style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray, fontSize = 12.sp)
@@ -801,8 +841,15 @@ private fun AiMessageItem(message: AiMessage) {
 
 @Composable
 private fun ToolCallMessageItem(message: ToolCallMessage) {
-    var isExpanded by remember { mutableStateOf(false) }
+    var isExpanded by remember { mutableStateOf(message.output.isNotEmpty() && message.toolName == "compileProject") }
     var outputLines by remember { mutableStateOf(5) }
+    
+    // 当编译工具产生新输出时自动展开
+    LaunchedEffect(message.output) {
+        if (message.output.isNotEmpty() && message.toolName == "compileProject") {
+            isExpanded = true
+        }
+    }
     
     val fileName: String? = (message.parameters["filePath"] 
         ?: message.parameters["fileName"] 
@@ -1038,17 +1085,38 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                                 }
                             }
                         }
-                        SelectionContainer {
-                            Text(
-                                text = message.output,
-                                style = JewelTheme.defaultTextStyle.copy(
-                                    color = Color.White,
-                                    fontSize = 11.sp
-                                ),
-                                maxLines = outputLines,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(8.dp)
-                            )
+                        val outputScrollState = rememberLazyListState()
+                        val outputLineList = remember(message.output) {
+                            message.output.split("\n").filter { it.isNotBlank() }
+                        }
+                        
+                        LazyColumn(
+                            state = outputScrollState,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = (outputLines * 16).dp)
+                                .padding(8.dp),
+                            reverseLayout = true
+                        ) {
+                            items(outputLineList.size) { index ->
+                                val lineIndex = outputLineList.size - 1 - index
+                                val line = outputLineList[lineIndex]
+                                Text(
+                                    text = line,
+                                    style = JewelTheme.defaultTextStyle.copy(
+                                        color = Color.White,
+                                        fontSize = 11.sp
+                                    ),
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        
+                        LaunchedEffect(message.output) {
+                            if (outputLineList.isNotEmpty()) {
+                                outputScrollState.scrollToItem(0)
+                            }
                         }
                     }
                 }
@@ -1177,7 +1245,8 @@ class AiMessage(
     override val id: String,
     override val content: String,
     override val timestamp: LocalDateTime,
-    var isGenerating: Boolean = false
+    var isGenerating: Boolean = false,
+    var tokenUsage: Pair<Int, Int>? = null
 ) : ChatMessage(id, content, timestamp)
 
 // 工具调用消息
@@ -1203,7 +1272,7 @@ fun ChatStateService.MessageState.toChatMessage(): ChatMessage {
     val dateTime = if (timestamp.isNotEmpty()) timestamp.toLocalDateTime() else LocalDateTime.now()
     return when (type) {
         "user" -> UserMessage(id, content, dateTime)
-        "ai" -> AiMessage(id, content, dateTime, isGenerating)
+        "ai" -> AiMessage(id, content, dateTime, isGenerating, if (inputTokens > 0 || outputTokens > 0) Pair(inputTokens, outputTokens) else null)
         "tool" -> ToolCallMessage(
             id = id,
             toolName = toolName,
@@ -1237,7 +1306,10 @@ fun ChatMessage.toMessageState(): ChatStateService.MessageState {
             type = "ai",
             content = content,
             timestamp = timestamp.toStateString(),
-            isGenerating = isGenerating
+            isGenerating = isGenerating,
+            inputTokens = tokenUsage?.first ?: 0,
+            outputTokens = tokenUsage?.second ?: 0,
+            totalTokens = (tokenUsage?.first ?: 0) + (tokenUsage?.second ?: 0)
         )
         is ToolCallMessage -> ChatStateService.MessageState(
             id = id,
