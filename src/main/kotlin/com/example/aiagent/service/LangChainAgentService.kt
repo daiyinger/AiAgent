@@ -406,8 +406,41 @@ class LangChainAgentService(private val project: Project) {
             
             val agent = buildAgent(toolCallCallback, onToolOutput)
             
+            // 获取对话历史
+            val chatStateService = ChatStateService.instance
+            val history = chatStateService.currentSession?.messages ?: emptyList()
+            
+            log("获取到 ${history.size} 条历史消息")
+            history.forEachIndexed { index, msg ->
+                log("历史消息 $index: type=${msg.type}, content=${msg.content.take(50)}...")
+            }
+            
+            // 构建对话历史文本
+            val historyText = buildString {
+                history.forEach { msg ->
+                    when (msg.type) {
+                        "user" -> appendLine("用户: ${msg.content}")
+                        "ai" -> appendLine("AI: ${msg.content}")
+                        "tool" -> {
+                            val resultSummary = when {
+                                msg.result == "成功" || msg.result?.startsWith("Success") == true -> "成功"
+                                msg.result == "失败" || msg.result?.startsWith("Error") == true -> "失败"
+                                else -> "执行完成"
+                            }
+                            appendLine("工具: ${msg.toolName} ($resultSummary)")
+                        }
+                    }
+                }
+            }
+            
+            log("构建的对话历史: ${historyText.take(200)}...")
+            
             // 构建完整消息
-            val fullMessage = "$systemPrompt\n\n用户: $message"
+            val fullMessage = if (historyText.isNotEmpty()) {
+                "$systemPrompt\n\n对话历史:\n$historyText\n\n用户: $message"
+            } else {
+                "$systemPrompt\n\n用户: $message"
+            }
             
             // 估算输入token数
             val estimatedInputTokens = estimateTokenCount(fullMessage)
@@ -479,6 +512,10 @@ class LangChainAgentService(private val project: Project) {
             - searchFiles(pattern, maxResults): 搜索文件
             - analyzeProject(): 分析项目结构
             - compileProject(mode): 编译项目，mode可选值：build（完整构建）、assemble（仅组装）、clean（清理构建）
+            
+            重要提示：
+            - 请记住对话历史，保持上下文的连贯性
+            - 当用户询问之前的问题时，请参考对话历史回答
             
             请简洁高效地完成任务，减少不必要的描述。
         """.trimIndent()
