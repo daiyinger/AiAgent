@@ -29,7 +29,7 @@ class ListFilesTool : Tool(
         )
     )
 ) {
-    override suspend fun execute(project: Project, params: Map<String, Any>): ToolResult {
+    override suspend fun execute(project: Project, params: Map<String, Any>, onOutput: ((String) -> Unit)?): ToolResult {
         val path = params["path"] as? String ?: ""
         val recursive = params["recursive"] as? Boolean ?: false
         val extension = params["extension"] as? String

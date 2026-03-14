@@ -116,14 +116,14 @@ fun ChatPanel() {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // 会话管理按钮
+                // 历史会话按钮
                 IconButton(
                     onClick = { isSessionManagerOpen = true },
                     modifier = Modifier.size(24.dp)
                 ) {
                     Text(
-                        text = "📁",
-                        style = JewelTheme.defaultTextStyle
+                        text = "☰",
+                        style = JewelTheme.defaultTextStyle.copy(fontSize = 16.sp)
                     )
                 }
                 
@@ -133,8 +133,8 @@ fun ChatPanel() {
                     modifier = Modifier.size(24.dp)
                 ) {
                     Text(
-                        text = "⚙️",
-                        style = JewelTheme.defaultTextStyle
+                        text = "⚙",
+                        style = JewelTheme.defaultTextStyle.copy(fontSize = 16.sp)
                     )
                 }
             }
@@ -308,7 +308,7 @@ fun ChatPanel() {
                                                     if (existingIndex >= 0) {
                                                         newMessages[existingIndex] = toolCall
                                                         log("更新工具调用消息: ${toolCall.toolName}")
-                                                        chatStateService.updateToolCallMessage(toolCall.id, toolCall.isExecuting, toolCall.result)
+                                                        chatStateService.updateToolCallMessage(toolCall.id, toolCall.isExecuting, toolCall.result, toolCall.output)
                                                     } else {
                                                         newMessages.add(toolCall)
                                                         log("添加新工具调用消息: ${toolCall.toolName}")
@@ -321,6 +321,30 @@ fun ChatPanel() {
                                             onTokenUsage = { inputTokens, outputTokens ->
                                                 tokenUsage = Pair(inputTokens, outputTokens)
                                                 log("Token使用情况: 输入=$inputTokens, 输出=$outputTokens")
+                                            },
+                                            onToolOutput = { toolName, output ->
+                                                if (!isSending) return@sendMessage
+                                                log("收到工具输出: $toolName - ${output.take(50)}...")
+                                                CoroutineScope(Dispatchers.Main).launch {
+                                                    val newMessages = messages.value.toMutableList()
+                                                    val toolCallIndex = newMessages.indexOfFirst { 
+                                                        it is ToolCallMessage && it.toolName == toolName && it.isExecuting 
+                                                    }
+                                                    if (toolCallIndex >= 0) {
+                                                        val existingToolCall = newMessages[toolCallIndex] as ToolCallMessage
+                                                        val updatedToolCall = existingToolCall.copy(
+                                                            output = existingToolCall.output + output + "\n"
+                                                        )
+                                                        newMessages[toolCallIndex] = updatedToolCall
+                                                        messages.value = newMessages
+                                                        chatStateService.updateToolCallMessage(
+                                                            updatedToolCall.id,
+                                                            updatedToolCall.isExecuting,
+                                                            updatedToolCall.result,
+                                                            updatedToolCall.output
+                                                        )
+                                                    }
+                                                }
                                             }
                                         )
                                         
@@ -853,6 +877,37 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                     }
                 }
                 
+                if (message.output.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF1A1A1A), RoundedCornerShape(6.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = "输出",
+                            style = JewelTheme.defaultTextStyle.copy(
+                                color = Color.LightGray,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                        SelectionContainer {
+                            Text(
+                                text = message.output,
+                                style = JewelTheme.defaultTextStyle.copy(
+                                    color = Color.White,
+                                    fontSize = 11.sp
+                                ),
+                                maxLines = 20,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+                
                 Text(
                     text = message.timestamp.format(DateTimeFormatter.ofPattern("HH:mm")),
                     style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray, fontSize = 10.sp),
@@ -987,7 +1042,8 @@ data class ToolCallMessage(
     val parameters: Map<String, Any>,
     override val timestamp: LocalDateTime,
     val isExecuting: Boolean = false,
-    val result: String? = null
+    val result: String? = null,
+    val output: String = ""
 ) : ChatMessage(id, "", timestamp)
 
 data class TokenUsageMessage(
@@ -1009,7 +1065,8 @@ fun ChatStateService.MessageState.toChatMessage(): ChatMessage {
             parameters = parameters.mapValues { it.value as Any },
             timestamp = dateTime,
             isExecuting = isExecuting,
-            result = result
+            result = result,
+            output = output
         )
         "token" -> TokenUsageMessage(
             id = id,
@@ -1044,7 +1101,8 @@ fun ChatMessage.toMessageState(): ChatStateService.MessageState {
             toolName = toolName,
             parameters = parameters.mapValues { it.toString() },
             isExecuting = isExecuting,
-            result = result
+            result = result,
+            output = output
         )
         is TokenUsageMessage -> ChatStateService.MessageState(
             id = id,

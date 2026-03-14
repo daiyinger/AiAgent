@@ -22,7 +22,7 @@ class BuildTool : Tool(
         )
     )
 ) {
-    override suspend fun execute(project: Project, params: Map<String, Any>): ToolResult {
+    override suspend fun execute(project: Project, params: Map<String, Any>, onOutput: ((String) -> Unit)?): ToolResult {
         val task = params["task"] as? String ?: "build"
         
         return try {

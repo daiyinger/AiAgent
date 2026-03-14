@@ -25,7 +25,7 @@ class CompileProjectTool : Tool(
         LogService.log("CompileProjectTool - $message")
     }
     
-    override suspend fun execute(project: Project, params: Map<String, Any>): ToolResult {
+    override suspend fun execute(project: Project, params: Map<String, Any>, onOutput: ((String) -> Unit)?): ToolResult {
         val mode = params["mode"] as? String ?: "build"
         
         return try {
@@ -81,6 +81,7 @@ class CompileProjectTool : Tool(
                         output.append(line).append("\n")
                         println("CompileProjectTool - Output: $line")
                         log("Output: $line")
+                        line?.let { onOutput?.invoke(it) }
                     }
                     reader.close()
                 }
@@ -93,6 +94,7 @@ class CompileProjectTool : Tool(
                         errorOutput.append(line).append("\n")
                         println("CompileProjectTool - Error: $line")
                         log("Error: $line")
+                        line?.let { onOutput?.invoke(it) }
                     }
                     reader.close()
                 }

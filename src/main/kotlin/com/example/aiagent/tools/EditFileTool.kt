@@ -30,7 +30,7 @@ class EditFileTool : Tool(
         )
     )
 ) {
-    override suspend fun execute(project: Project, params: Map<String, Any>): ToolResult {
+    override suspend fun execute(project: Project, params: Map<String, Any>, onOutput: ((String) -> Unit)?): ToolResult {
         val path = params["path"] as? String ?: return ToolResult.Error("Missing required parameter: path")
         val oldText = params["old_text"] as? String ?: return ToolResult.Error("Missing required parameter: old_text")
         val newText = params["new_text"] as? String ?: return ToolResult.Error("Missing required parameter: new_text")

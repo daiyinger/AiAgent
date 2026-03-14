@@ -36,7 +36,11 @@ class LangChainAgentService(private val project: Project) {
     /**
      * 工具类包装器，将现有工具转换为LangChain4j工具
      */
-    class ToolWrapper(private val project: Project, private val onToolCall: (String, String, String) -> Unit) {
+    class ToolWrapper(
+        private val project: Project, 
+        private val onToolCall: (String, String, String) -> Unit,
+        private val onToolOutput: ((String, String) -> Unit)? = null
+    ) {
         
         @Tool("List files and directories in a given path. Supports filtering by file extension.")
         fun listFiles(
@@ -68,6 +72,9 @@ class LangChainAgentService(private val project: Project) {
                     onToolCall("listFiles", params.toString(), "进行中: ${result.message}")
                     "Progress: ${result.message}"
                 }
+                is ToolResult.OutputUpdate -> {
+                    "Output: ${result.output}"
+                }
             }
             return response
         }
@@ -94,6 +101,9 @@ class LangChainAgentService(private val project: Project) {
                 is ToolResult.Progress -> {
                     onToolCall("readFile", params.toString(), "进行中: ${result.message}")
                     "Progress: ${result.message}"
+                }
+                is ToolResult.OutputUpdate -> {
+                    "Output: ${result.output}"
                 }
             }
             return response
@@ -126,6 +136,9 @@ class LangChainAgentService(private val project: Project) {
                     onToolCall("editFile", params.toString(), "进行中: ${result.message}")
                     "Progress: ${result.message}"
                 }
+                is ToolResult.OutputUpdate -> {
+                    "Output: ${result.output}"
+                }
             }
             return response
         }
@@ -154,6 +167,9 @@ class LangChainAgentService(private val project: Project) {
                     onToolCall("searchFiles", params.toString(), "进行中: ${result.message}")
                     "Progress: ${result.message}"
                 }
+                is ToolResult.OutputUpdate -> {
+                    "Output: ${result.output}"
+                }
             }
             return response
         }
@@ -181,6 +197,9 @@ class LangChainAgentService(private val project: Project) {
                     onToolCall("analyzeProject", params.toString(), "进行中: ${result.message}")
                     "Progress: ${result.message}"
                 }
+                is ToolResult.OutputUpdate -> {
+                    "Output: ${result.output}"
+                }
             }
             return response
         }
@@ -192,7 +211,9 @@ class LangChainAgentService(private val project: Project) {
             onToolCall("compileProject", params.toString(), "执行中...")
             
             val result = runBlocking {
-                CompileProjectTool().execute(project, params)
+                CompileProjectTool().execute(project, params) { output ->
+                    onToolOutput?.invoke("compileProject", output)
+                }
             }
             
             val response = when (result) {
@@ -207,6 +228,9 @@ class LangChainAgentService(private val project: Project) {
                 is ToolResult.Progress -> {
                     onToolCall("compileProject", params.toString(), "进行中: ${result.message}")
                     "Progress: ${result.message}"
+                }
+                is ToolResult.OutputUpdate -> {
+                    "Output: ${result.output}"
                 }
             }
             return response
@@ -270,11 +294,14 @@ class LangChainAgentService(private val project: Project) {
     /**
      * 构建Agent
      */
-    private fun buildAgent(onToolCall: (String, String, String) -> Unit): Agent {
+    private fun buildAgent(
+        onToolCall: (String, String, String) -> Unit,
+        onToolOutput: ((String, String) -> Unit)? = null
+    ): Agent {
         log("构建LangChain4j Agent")
         
         val chatModel = createChatModel()
-        val toolWrapper = ToolWrapper(project, onToolCall)
+        val toolWrapper = ToolWrapper(project, onToolCall, onToolOutput)
         
         return AiServices.builder(Agent::class.java)
             .chatLanguageModel(chatModel)
@@ -289,7 +316,8 @@ class LangChainAgentService(private val project: Project) {
         message: String,
         onChunk: (String) -> Unit,
         onToolCall: (ToolCallMessage) -> Unit,
-        onTokenUsage: (Int, Int) -> Unit = { _, _ -> }
+        onTokenUsage: (Int, Int) -> Unit = { _, _ -> },
+        onToolOutput: ((String, String) -> Unit)? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             log("发送消息: ${message.take(100)}...")
@@ -366,7 +394,7 @@ class LangChainAgentService(private val project: Project) {
                 }
             }
             
-            val agent = buildAgent(toolCallCallback)
+            val agent = buildAgent(toolCallCallback, onToolOutput)
             
             // 构建完整消息
             val fullMessage = "$systemPrompt\n\n用户: $message"

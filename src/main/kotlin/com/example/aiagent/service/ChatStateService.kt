@@ -29,6 +29,7 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
         var parameters: Map<String, String> = emptyMap(),
         var isExecuting: Boolean = false,
         var result: String? = null,
+        var output: String = "",
         var isGenerating: Boolean = false,
         var inputTokens: Int = 0,
         var outputTokens: Int = 0,
@@ -141,13 +142,16 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
         }
     }
     
-    fun updateToolCallMessage(messageId: String, isExecuting: Boolean, result: String?) {
+    fun updateToolCallMessage(messageId: String, isExecuting: Boolean, result: String?, output: String = "") {
         val currentSessionState = currentSession
         if (currentSessionState != null) {
             val msgIndex = currentSessionState.messages.indexOfFirst { it.id == messageId && it.type == "tool" }
             if (msgIndex >= 0) {
                 currentSessionState.messages[msgIndex].isExecuting = isExecuting
                 currentSessionState.messages[msgIndex].result = result
+                if (output.isNotEmpty()) {
+                    currentSessionState.messages[msgIndex].output = output
+                }
             }
         }
     }
