@@ -1185,7 +1185,8 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
             if (isExpanded) {
                 Spacer(modifier = Modifier.height(8.dp))
                 
-                if (message.parameters.isNotEmpty()) {
+                // 对于 editFile 工具，不显示参数详细部分，只显示差异部分
+                if (message.parameters.isNotEmpty() && message.toolName != "editFile" && message.toolName != "edit_file") {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1218,7 +1219,8 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                     Spacer(modifier = Modifier.height(6.dp))
                 }
                 
-                if (message.result != null) {
+                // 对于 editFile 工具，不显示结果部分，只显示差异部分
+                if (message.result != null && message.toolName != "editFile" && message.toolName != "edit_file") {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1249,7 +1251,8 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                     }
                 }
                 
-                if (message.output.isNotEmpty()) {
+                // 对于 editFile 工具，不显示输出部分，只显示差异部分
+                if (message.output.isNotEmpty() && message.toolName != "editFile" && message.toolName != "edit_file") {
                     Spacer(modifier = Modifier.height(6.dp))
                     Column(
                         modifier = Modifier

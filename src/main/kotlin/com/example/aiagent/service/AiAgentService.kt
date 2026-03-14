@@ -178,8 +178,28 @@ class AiAgentService {
     }
     
     // 构建包含工具定义的提示
-    fun buildPromptWithTools(userMessage: String): String {
+    fun buildPromptWithTools(userMessage: String, history: List<ChatStateService.MessageState> = emptyList()): String {
         val toolDefinitions = getToolDefinitions()
+        
+        // 构建对话历史
+        val historyText = buildString {
+            history.forEach { message ->
+                when (message.type) {
+                    "user" -> appendLine("用户：${message.content}")
+                    "ai" -> appendLine("AI：${message.content}")
+                    "tool" -> {
+                        // 工具调用历史只显示工具名称和结果状态，不显示详细内容
+                        val resultSummary = when {
+                            message.result == "成功" || message.result?.startsWith("Success") == true -> "成功"
+                            message.result == "失败" || message.result?.startsWith("Error") == true -> "失败"
+                            else -> "执行完成"
+                        }
+                        appendLine("工具：${message.toolName} ($resultSummary)")
+                    }
+                }
+            }
+        }
+        
         return """
         你是一个Android Studio工程分析专家，专门帮助开发者分析、理解和优化Android项目。你可以使用以下工具来操作和分析Android工程：
         
@@ -204,6 +224,7 @@ class AiAgentService {
         - 根据工具执行结果，继续调用其他工具或提供分析结果
         - 例如：先调用list_files查看项目结构，然后根据结果调用read_file查看关键文件
         - 不要只调用一个工具就停止，要持续分析直到完成用户的需求
+        - 请记住之前的对话历史，保持上下文的连贯性
         
         具体任务处理流程：
         1. 当用户要求"分析工程"时：
@@ -228,6 +249,9 @@ class AiAgentService {
            - 使用edit_file工具进行修改
            - 提供修改的详细说明
         
+        对话历史：
+        $historyText
+        
         用户消息：
         $userMessage
         """.trimIndent()
@@ -249,8 +273,12 @@ class AiAgentService {
                 else -> "/api/generate"
             })
             
+            // 获取对话历史
+            val chatStateService = ChatStateService.instance
+            val history = chatStateService.currentSession?.messages ?: emptyList()
+            
             // 构建包含工具定义的提示
-            val promptWithTools = buildPromptWithTools(message)
+            val promptWithTools = buildPromptWithTools(message, history)
             
             val requestBody = when (currentProvider.apiType) {
                 "ollama" -> JSONObject().apply {
@@ -275,7 +303,7 @@ class AiAgentService {
                 }
                 else -> JSONObject().apply {
                     put("model", settings.currentModel)
-                    put("prompt", message)
+                    put("prompt", promptWithTools)
                     put("stream", false)
                 }
             }
@@ -329,8 +357,12 @@ class AiAgentService {
             
             log("API URL: $apiUrl")
             
+            // 获取对话历史
+            val chatStateService = ChatStateService.instance
+            val history = chatStateService.currentSession?.messages ?: emptyList()
+            
             // 构建包含工具定义的提示
-            val promptWithTools = buildPromptWithTools(message)
+            val promptWithTools = buildPromptWithTools(message, history)
             log("构建的提示: ${promptWithTools.take(500)}...")
             
             val requestBody = when (currentProvider.apiType) {
@@ -357,7 +389,7 @@ class AiAgentService {
                 }
                 else -> JSONObject().apply {
                     put("model", settings.currentModel)
-                    put("prompt", message)
+                    put("prompt", promptWithTools)
                     put("stream", true)
                 }
             }
