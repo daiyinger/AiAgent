@@ -819,15 +819,20 @@ private fun ModelSelector(settingsVersion: Int = 0) {
         var expanded by remember { mutableStateOf(false) }
         val listState = rememberLazyListState()
         
-        val currentProviderId = settings.currentProviderId
-        val currentProvider = settings.providers.find { it.id == currentProviderId } ?: settings.providers.firstOrNull()
-        val allSelectedModels = currentProvider?.selectedModels ?: emptyList()
         val currentModel = settings.currentModel
         
+        // 构建所有提供者的模型列表，按提供者分组
+        data class ModelItem(val model: String, val providerId: String, val providerName: String)
+        val allModelsWithProvider = mutableListOf<ModelItem>()
+        settings.providers.forEach { provider ->
+            provider.selectedModels.forEach { model ->
+                allModelsWithProvider.add(ModelItem(model, provider.id, provider.name))
+            }
+        }
+        
         LaunchedEffect(expanded) {
-            if (expanded && allSelectedModels.isNotEmpty()) {
-                val reversedList = allSelectedModels.reversed()
-                val currentIndex = reversedList.indexOf(currentModel)
+            if (expanded && allModelsWithProvider.isNotEmpty()) {
+                val currentIndex = allModelsWithProvider.indexOfFirst { it.model == currentModel }
                 if (currentIndex >= 0) {
                     listState.scrollToItem(currentIndex)
                 }
@@ -850,40 +855,72 @@ private fun ModelSelector(settingsVersion: Int = 0) {
                     Box(
                         modifier = Modifier
                             .width(200.dp)
-                            .heightIn(max = 120.dp)
+                            .heightIn(max = 200.dp)
                             .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
                             .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
                             .padding(4.dp)
                     ) {
                         androidx.compose.foundation.lazy.LazyColumn(
                             modifier = Modifier.fillMaxWidth(),
-                            state = listState,
-                            reverseLayout = true
+                            state = listState
                         ) {
-                            allSelectedModels.reversed().forEach { model ->
+                            var lastProviderId: String? = null
+                            allModelsWithProvider.forEach { item ->
+                                // 如果切换了提供者，添加分隔符
+                                if (lastProviderId != null && lastProviderId != item.providerId) {
+                                    item {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp)
+                                                .height(1.dp)
+                                                .background(Color.Gray.copy(alpha = 0.5f))
+                                        )
+                                    }
+                                }
+                                
+                                // 如果是该提供者的第一个模型，显示提供者名称
+                                if (lastProviderId != item.providerId) {
+                                    item {
+                                        Text(
+                                            text = item.providerName,
+                                            style = JewelTheme.defaultTextStyle.copy(
+                                                color = Color.Gray,
+                                                fontSize = 10.sp
+                                            ),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                
                                 item {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .background(
-                                                if (model == currentModel) Color(0xFF007ACC) else Color.Transparent,
+                                                if (item.model == currentModel) Color(0xFF007ACC) else Color.Transparent,
                                                 RoundedCornerShape(4.dp)
                                             )
                                             .clickable {
-                                                settings.currentModel = model
+                                                settings.currentModel = item.model
+                                                settings.currentProviderId = item.providerId
                                                 expanded = false
                                             }
                                             .padding(horizontal = 8.dp, vertical = 4.dp)
                                     ) {
                                         Text(
-                                            text = model,
+                                            text = item.model,
                                             style = JewelTheme.defaultTextStyle.copy(
-                                                color = if (model == currentModel) Color.White else Color.LightGray,
-                                                fontWeight = if (model == currentModel) FontWeight.Bold else FontWeight.Normal
+                                                color = if (item.model == currentModel) Color.White else Color.LightGray,
+                                                fontWeight = if (item.model == currentModel) FontWeight.Bold else FontWeight.Normal
                                             )
                                         )
                                     }
                                 }
+                                
+                                lastProviderId = item.providerId
                             }
                         }
                     }
