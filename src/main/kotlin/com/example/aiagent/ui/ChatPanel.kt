@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
+import com.example.aiagent.service.AiAgentService
 import com.example.aiagent.service.ChatStateService
 import com.example.aiagent.service.ChatStateService.MessageState
 import com.example.aiagent.service.ChatStateService.SessionState
@@ -108,6 +109,7 @@ private fun log(message: String) {
 fun ChatPanel() {
     val settings = AiAgentSettings.instance.state
     val currentProject = remember { ProjectManager.getInstance().openProjects.firstOrNull() }
+    val aiAgentService = remember { AiAgentService() }
     val langChainService = remember { currentProject?.let { LangChainAgentService(it) } }
     val chatStateService = remember { ChatStateService.instance }
     

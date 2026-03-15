@@ -262,7 +262,13 @@ class AiAgentService {
         val parameters: Map<String, Any>
     )
     
-    suspend fun sendMessage(message: String): Result<String> = withContext(Dispatchers.IO) {
+    data class TokenUsage(
+        val promptTokens: Int,
+        val completionTokens: Int,
+        val totalTokens: Int
+    )
+    
+    suspend fun sendMessage(message: String): Result<Pair<String, TokenUsage?>> = withContext(Dispatchers.IO) {
         try {
             val settings = AiAgentSettings.instance.state
             val currentProvider = settings.providers.find { it.id == settings.currentProviderId } ?: settings.providers[0]
@@ -331,7 +337,37 @@ class AiAgentService {
                     "openai" -> jsonResponse.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content", "") ?: ""
                     else -> jsonResponse.optString("response", "")
                 }
-                Result.success(generatedText)
+                
+                val tokenUsage = when (currentProvider.apiType) {
+                    "openai" -> {
+                        val usage = jsonResponse.optJSONObject("usage")
+                        if (usage != null) {
+                            TokenUsage(
+                                promptTokens = usage.optInt("prompt_tokens", 0),
+                                completionTokens = usage.optInt("completion_tokens", 0),
+                                totalTokens = usage.optInt("total_tokens", 0)
+                            )
+                        } else {
+                            null
+                        }
+                    }
+                    "ollama" -> {
+                        val evalCount = jsonResponse.optInt("eval_count", 0)
+                        val promptEvalCount = jsonResponse.optInt("prompt_eval_count", 0)
+                        if (evalCount > 0 || promptEvalCount > 0) {
+                            TokenUsage(
+                                promptTokens = promptEvalCount,
+                                completionTokens = evalCount - promptEvalCount,
+                                totalTokens = evalCount
+                            )
+                        } else {
+                            null
+                        }
+                    }
+                    else -> null
+                }
+                
+                Result.success(Pair(generatedText, tokenUsage))
             } else {
                 Result.failure(Exception("API 返回错误：${response.statusCode()}\n${response.body()}"))
             }
@@ -340,7 +376,12 @@ class AiAgentService {
         }
     }
     
-    suspend fun sendMessageStream(message: String, onChunk: (String) -> Unit, onToolCall: (ToolCall) -> Unit): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun sendMessageStream(
+        message: String, 
+        onChunk: (String) -> Unit, 
+        onToolCall: (ToolCall) -> Unit,
+        onTokenUsage: (TokenUsage?) -> Unit = {}
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             log("开始发送流式消息: $message")
             val settings = AiAgentSettings.instance.state
@@ -421,6 +462,8 @@ class AiAgentService {
             var accumulatedText = ""
             var processingToolCall = false
             var toolCallDetected = false
+            var totalPromptTokens = 0
+            var totalCompletionTokens = 0
             
             lines.forEach { line ->
                 val trimmedLine = line.trim()
@@ -434,6 +477,17 @@ class AiAgentService {
                             log("Ollama响应行: $trimmedLine")
                             val json = JSONObject(trimmedLine)
                             val chunk = json.optString("response", "")
+                            
+                            // 收集 token 使用情况
+                            val promptEvalCount = json.optInt("prompt_eval_count", 0)
+                            val evalCount = json.optInt("eval_count", 0)
+                            if (promptEvalCount > 0) {
+                                totalPromptTokens = promptEvalCount
+                            }
+                            if (evalCount > 0) {
+                                totalCompletionTokens = evalCount - totalPromptTokens
+                            }
+                            
                             if (chunk.isNotEmpty()) {
                                 log("收到Ollama chunk: ${chunk.take(100)}...")
                                 accumulatedText += chunk
@@ -478,6 +532,14 @@ class AiAgentService {
                                     return@forEach
                                 }
                                 val json = JSONObject(data)
+                                
+                                // 收集 token 使用情况
+                                val usage = json.optJSONObject("usage")
+                                if (usage != null) {
+                                    totalPromptTokens = usage.optInt("prompt_tokens", 0)
+                                    totalCompletionTokens = usage.optInt("completion_tokens", 0)
+                                }
+                                
                                 val chunk = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta")?.optString("content", "") ?: ""
                                 if (chunk.isNotEmpty()) {
                                     log("收到OpenAI chunk: ${chunk.take(100)}...")
@@ -567,6 +629,18 @@ class AiAgentService {
                     e.printStackTrace()
                 }
             }
+            
+            // 通知 token 使用情况
+            val tokenUsage = if (totalPromptTokens > 0 || totalCompletionTokens > 0) {
+                TokenUsage(
+                    promptTokens = totalPromptTokens,
+                    completionTokens = totalCompletionTokens,
+                    totalTokens = totalPromptTokens + totalCompletionTokens
+                )
+            } else {
+                null
+            }
+            onTokenUsage(tokenUsage)
             
             log("流式消息处理完成")
             Result.success(Unit)

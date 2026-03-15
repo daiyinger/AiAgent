@@ -6,9 +6,12 @@ import com.example.aiagent.ui.ToolCallMessage
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import dev.langchain4j.agent.tool.Tool
+import dev.langchain4j.data.message.AiMessage
+import dev.langchain4j.data.message.ChatMessage
 import dev.langchain4j.model.chat.ChatLanguageModel
 import dev.langchain4j.model.openai.OpenAiChatModel
 import dev.langchain4j.model.ollama.OllamaChatModel
+import dev.langchain4j.model.output.Response
 import dev.langchain4j.service.AiServices
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -32,6 +35,65 @@ class LangChainAgentService(private val project: Project) {
     interface Agent {
         fun chat(message: String): String
     }
+    
+    /**
+     * 包装的 ChatLanguageModel，用于捕获 token 使用情况
+     */
+    inner class TokenCapturingChatLanguageModel(
+        private val delegate: ChatLanguageModel
+    ) : ChatLanguageModel {
+        var tokenUsage: TokenUsage? = null
+        
+        override fun generate(messages: List<ChatMessage>): Response<AiMessage> {
+            val response = delegate.generate(messages)
+            // 从响应中提取token使用情况
+            extractTokenUsage(response)
+            return response
+        }
+        
+        override fun generate(messages: List<ChatMessage>, toolSpecifications: List<dev.langchain4j.agent.tool.ToolSpecification>): Response<AiMessage> {
+            val response = delegate.generate(messages, toolSpecifications)
+            // 从响应中提取token使用情况
+            extractTokenUsage(response)
+            return response
+        }
+        
+        override fun generate(messages: List<ChatMessage>, toolSpecification: dev.langchain4j.agent.tool.ToolSpecification): Response<AiMessage> {
+            val response = delegate.generate(messages, toolSpecification)
+            // 从响应中提取token使用情况
+            extractTokenUsage(response)
+            return response
+        }
+        
+        /**
+         * 从Response中提取token使用情况
+         */
+        private fun extractTokenUsage(response: Response<AiMessage>) {
+            try {
+                // 检查响应是否包含tokenUsage
+                val tokenUsageInfo = response.tokenUsage()
+                if (tokenUsageInfo != null) {
+                    val promptTokens = tokenUsageInfo.inputTokenCount()
+                    val completionTokens = tokenUsageInfo.outputTokenCount()
+                    val totalTokens = tokenUsageInfo.totalTokenCount()
+                    
+                    if (promptTokens != null && completionTokens != null) {
+                        tokenUsage = TokenUsage(promptTokens, completionTokens, totalTokens ?: (promptTokens + completionTokens))
+                        this@LangChainAgentService.log("提取到Token使用情况: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens")
+                    }
+                }
+            } catch (e: Exception) {
+                this@LangChainAgentService.log("提取Token使用情况时出错: ${e.message}")
+                e.printStackTrace()
+            }
+        }
+    }
+    
+    data class TokenUsage(
+        val promptTokens: Int,
+        val completionTokens: Int,
+        val totalTokens: Int
+    )
     
     /**
      * 工具类包装器，将现有工具转换为LangChain4j工具
@@ -240,7 +302,7 @@ class LangChainAgentService(private val project: Project) {
     /**
      * 创建ChatLanguageModel
      */
-    private fun createChatModel(): ChatLanguageModel {
+    private fun createChatModel(): TokenCapturingChatLanguageModel {
         val settings = AiAgentSettings.instance.state
         val currentProvider = settings.providers.find { it.id == settings.currentProviderId } 
             ?: settings.providers.firstOrNull() 
@@ -248,7 +310,7 @@ class LangChainAgentService(private val project: Project) {
         
         log("创建ChatModel: provider=${currentProvider.name}, model=${settings.currentModel}")
         
-        return when (currentProvider.apiType) {
+        val originalModel = when (currentProvider.apiType) {
             "openai" -> {
                 val baseUrl = currentProvider.apiUrl.trimEnd('/')
                 val finalUrl = if (baseUrl.endsWith("/v1")) {
@@ -289,6 +351,9 @@ class LangChainAgentService(private val project: Project) {
                 throw IllegalArgumentException("Unsupported API type: ${currentProvider.apiType}")
             }
         }
+        
+        // 使用TokenCapturingChatLanguageModel包装原始模型
+        return TokenCapturingChatLanguageModel(originalModel)
     }
     
     /**
@@ -297,16 +362,18 @@ class LangChainAgentService(private val project: Project) {
     private fun buildAgent(
         onToolCall: (String, String, String) -> Unit,
         onToolOutput: ((String, String) -> Unit)? = null
-    ): Agent {
+    ): Pair<Agent, TokenCapturingChatLanguageModel> {
         log("构建LangChain4j Agent")
         
         val chatModel = createChatModel()
         val toolWrapper = ToolWrapper(project, onToolCall, onToolOutput)
         
-        return AiServices.builder(Agent::class.java)
+        val agent = AiServices.builder(Agent::class.java)
             .chatLanguageModel(chatModel)
             .tools(toolWrapper)
             .build()
+        
+        return Pair(agent, chatModel)
     }
     
     /**
@@ -404,7 +471,8 @@ class LangChainAgentService(private val project: Project) {
                 }
             }
             
-            val agent = buildAgent(toolCallCallback, onToolOutput)
+            // 构建Agent并获取TokenCapturingChatLanguageModel
+            val (agent, tokenCapturingModel) = buildAgent(toolCallCallback, onToolOutput)
             
             // 获取对话历史
             val chatStateService = ChatStateService.instance
@@ -452,13 +520,16 @@ class LangChainAgentService(private val project: Project) {
             // 添加到缓存
             addToCache(message, response)
             
-            // 估算输出token数
-            val estimatedOutputTokens = estimateTokenCount(response)
-            log("估算输出token数: $estimatedOutputTokens")
+            // 获取实际的token使用情况
+            val tokenUsage = tokenCapturingModel.tokenUsage
+            val actualInputTokens = tokenUsage?.promptTokens ?: estimatedInputTokens
+            val actualOutputTokens = tokenUsage?.completionTokens ?: estimateTokenCount(response)
+            
+            log("实际Token使用情况: 输入=$actualInputTokens, 输出=$actualOutputTokens")
             
             // 通知token使用情况
             ApplicationManager.getApplication().invokeLater {
-                onTokenUsage(estimatedInputTokens, estimatedOutputTokens)
+                onTokenUsage(actualInputTokens, actualOutputTokens)
             }
             
             log("收到响应: ${response.take(100)}...")
