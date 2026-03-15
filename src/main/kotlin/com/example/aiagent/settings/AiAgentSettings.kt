@@ -31,11 +31,11 @@ class AiAgentSettings : PersistentStateComponent<AiAgentSettings.State> {
                 name = "默认本地Ollama",
                 apiType = "ollama",
                 apiUrl = "http://localhost:11434",
-                selectedModels = mutableListOf("llama2")
+                selectedModels = mutableListOf()
             )
         ),
         var currentProviderId: String = "default",
-        var currentModel: String = "llama2",
+        var currentModel: String = "",
         var enableLogging: Boolean = false
     )
     

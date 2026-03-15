@@ -1,6 +1,7 @@
 package com.example.aiagent.ui
 
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -16,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -815,11 +817,22 @@ private fun ModelSelector(settingsVersion: Int = 0) {
     key(settingsVersion) {
         val settings = AiAgentSettings.instance.state
         var expanded by remember { mutableStateOf(false) }
+        val listState = rememberLazyListState()
         
         val currentProviderId = settings.currentProviderId
         val currentProvider = settings.providers.find { it.id == currentProviderId } ?: settings.providers.firstOrNull()
         val allSelectedModels = currentProvider?.selectedModels ?: emptyList()
         val currentModel = settings.currentModel
+        
+        LaunchedEffect(expanded) {
+            if (expanded && allSelectedModels.isNotEmpty()) {
+                val reversedList = allSelectedModels.reversed()
+                val currentIndex = reversedList.indexOf(currentModel)
+                if (currentIndex >= 0) {
+                    listState.scrollToItem(currentIndex)
+                }
+            }
+        }
         
         Box(modifier = Modifier.wrapContentSize(Alignment.BottomStart)) {
             OutlinedButton(
@@ -829,40 +842,47 @@ private fun ModelSelector(settingsVersion: Int = 0) {
             }
             
             if (expanded) {
-                Box(
-                    modifier = Modifier
-                        .absoluteOffset(y = (-4).dp)
-                        .width(200.dp)
-                        .heightIn(max = 150.dp)
-                        .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
-                        .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                        .padding(4.dp)
+                Popup(
+                    alignment = Alignment.BottomStart,
+                    onDismissRequest = { expanded = false },
+                    offset = IntOffset(x = 0, y = -4)
                 ) {
-                    androidx.compose.foundation.lazy.LazyColumn(
-                        reverseLayout = true
+                    Box(
+                        modifier = Modifier
+                            .width(200.dp)
+                            .heightIn(max = 120.dp)
+                            .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
+                            .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                            .padding(4.dp)
                     ) {
-                        allSelectedModels.reversed().forEach { model ->
-                            item {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(
-                                            if (model == currentModel) Color(0xFF007ACC) else Color.Transparent,
-                                            RoundedCornerShape(4.dp)
+                        androidx.compose.foundation.lazy.LazyColumn(
+                            modifier = Modifier.fillMaxWidth(),
+                            state = listState,
+                            reverseLayout = true
+                        ) {
+                            allSelectedModels.reversed().forEach { model ->
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                if (model == currentModel) Color(0xFF007ACC) else Color.Transparent,
+                                                RoundedCornerShape(4.dp)
+                                            )
+                                            .clickable {
+                                                settings.currentModel = model
+                                                expanded = false
+                                            }
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = model,
+                                            style = JewelTheme.defaultTextStyle.copy(
+                                                color = if (model == currentModel) Color.White else Color.LightGray,
+                                                fontWeight = if (model == currentModel) FontWeight.Bold else FontWeight.Normal
+                                            )
                                         )
-                                        .clickable {
-                                            settings.currentModel = model
-                                            expanded = false
-                                        }
-                                        .padding(8.dp)
-                                ) {
-                                    Text(
-                                        text = model,
-                                        style = JewelTheme.defaultTextStyle.copy(
-                                            color = if (model == currentModel) Color.White else Color.LightGray,
-                                            fontWeight = if (model == currentModel) FontWeight.Bold else FontWeight.Normal
-                                        )
-                                    )
+                                    }
                                 }
                             }
                         }
@@ -882,8 +902,8 @@ private fun UserMessageItem(message: UserMessage) {
         Column(
             modifier = Modifier
                 .widthIn(max = 350.dp)
-                .background(Color(0xFF007ACC), RoundedCornerShape(12.dp))
-                .padding(12.dp)
+                .background(Color(0xFF3A3A3A), RoundedCornerShape(12.dp))
+                .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)
         ) {
             SelectionContainer {
                 Text(
@@ -891,6 +911,7 @@ private fun UserMessageItem(message: UserMessage) {
                     style = JewelTheme.defaultTextStyle.copy(color = Color.White)
                 )
             }
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = message.timestamp.format(DateTimeFormatter.ofPattern("HH:mm")),
                 style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp),
@@ -910,7 +931,7 @@ private fun AiMessageItem(message: AiMessage) {
             modifier = Modifier
                 .widthIn(max = 350.dp)
                 .background(Color(0xFF2D2D2D), RoundedCornerShape(12.dp))
-                .padding(12.dp)
+                .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)
         ) {
             SelectionContainer {
                 Text(
@@ -918,9 +939,10 @@ private fun AiMessageItem(message: AiMessage) {
                     style = JewelTheme.defaultTextStyle.copy(color = Color.White)
                 )
             }
+            Spacer(modifier = Modifier.height(4.dp))
             Row(
-                modifier = Modifier.align(Alignment.End),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (message.isGenerating) {
@@ -928,22 +950,19 @@ private fun AiMessageItem(message: AiMessage) {
                         text = "生成中...",
                         style = JewelTheme.defaultTextStyle.copy(color = Color.Gray, fontSize = 12.sp)
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
                 }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    message.tokenUsage?.let {
-                        Text(
-                            text = "Tokens: in ${it.first}/out ${it.second}",
-                            style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp)
-                        )
-                    }
+                message.tokenUsage?.let {
                     Text(
-                        text = message.timestamp.format(DateTimeFormatter.ofPattern("HH:mm")),
+                        text = "Tokens: in ${it.first}/out ${it.second}",
                         style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp)
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
                 }
+                Text(
+                    text = message.timestamp.format(DateTimeFormatter.ofPattern("HH:mm")),
+                    style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp)
+                )
             }
         }
     }

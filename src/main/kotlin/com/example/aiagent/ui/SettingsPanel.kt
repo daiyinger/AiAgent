@@ -4,7 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -64,8 +66,16 @@ fun SettingsPanel(
     val topPFocusRequester = remember { FocusRequester() }
     val contextLengthFocusRequester = remember { FocusRequester() }
     
+    val providerListState = rememberLazyListState()
+    
     val scope = rememberCoroutineScope()
     val aiService = remember { AiAgentService() }
+    
+    LaunchedEffect(Unit) {
+        if (settings.providers.isNotEmpty() && currentProviderIndex >= 0) {
+            providerListState.scrollToItem(currentProviderIndex)
+        }
+    }
     
     LaunchedEffect(currentProviderIndex) {
         if (settings.providers.isNotEmpty()) {
@@ -174,6 +184,7 @@ fun SettingsPanel(
                 ) {
                     androidx.compose.foundation.lazy.LazyColumn(
                         modifier = Modifier.fillMaxSize(),
+                        state = providerListState,
                         contentPadding = PaddingValues(4.dp)
                     ) {
                         items(settings.providers) { provider ->
@@ -310,7 +321,7 @@ fun SettingsPanel(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = currentApiType.uppercase(),
+                                    text = if (currentApiType == "openai") "OpenAI" else currentApiType.replaceFirstChar { it.uppercase() },
                                     style = JewelTheme.defaultTextStyle.copy(color = Color.White)
                                 )
                                 Text(
@@ -355,7 +366,7 @@ fun SettingsPanel(
                                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                                         ) {
                                             Text(
-                                                text = type.uppercase(),
+                                                text = if (type == "openai") "OpenAI" else type.replaceFirstChar { it.uppercase() },
                                                 style = JewelTheme.defaultTextStyle.copy(
                                                     color = if (currentApiType == type) Color(0xFF007ACC) else Color.White
                                                 )
@@ -502,12 +513,12 @@ fun SettingsPanel(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(120.dp)
+                                .heightIn(max = 120.dp)
                                 .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
                                 .background(JewelTheme.globalColors.panelBackground)
                         ) {
                             androidx.compose.foundation.lazy.LazyColumn(
-                                modifier = Modifier.fillMaxSize(),
+                                modifier = Modifier.fillMaxWidth(),
                                 contentPadding = PaddingValues(8.dp)
                             ) {
                                 val modelsToShow = if (availableModels.isNotEmpty()) availableModels else selectedModels
@@ -515,7 +526,6 @@ fun SettingsPanel(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(4.dp)
                                             .clickable {
                                                 val newSelectedModels = selectedModels.toMutableList()
                                                 if (newSelectedModels.contains(model)) {
@@ -533,12 +543,12 @@ fun SettingsPanel(
                                                 if (selectedModels.contains(model)) Color(0xFF007ACC).copy(alpha = 0.3f) else Color.Transparent,
                                                 RoundedCornerShape(4.dp)
                                             )
-                                            .padding(8.dp),
+                                            .padding(horizontal = 8.dp, vertical = 4.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(18.dp)
+                                                .size(16.dp)
                                                 .border(
                                                     1.dp,
                                                     if (selectedModels.contains(model)) Color(0xFF007ACC) else Color.Gray,
@@ -553,13 +563,13 @@ fun SettingsPanel(
                                                     text = "✓",
                                                     style = JewelTheme.defaultTextStyle.copy(
                                                         color = Color.White,
-                                                        fontSize = 12.sp
+                                                        fontSize = 10.sp
                                                     ),
                                                     modifier = Modifier.align(Alignment.Center)
                                                 )
                                             }
                                         }
-                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
                                         Text(
                                             model,
                                             style = JewelTheme.defaultTextStyle.copy(color = Color.White)
