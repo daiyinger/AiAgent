@@ -434,7 +434,8 @@ fun ChatPanel() {
                                     id = aiMessageId,
                                     content = "",
                                     timestamp = aiMessageTimestamp,
-                                    isGenerating = true
+                                    isGenerating = true,
+                                    modelName = settings.currentModel
                                 )
                                 
                                 val updatedMessagesWithAi = messages.value.toMutableList()
@@ -470,7 +471,8 @@ fun ChatPanel() {
                                                             content = currentContent,
                                                             timestamp = aiMessageTimestamp,
                                                             isGenerating = isGenerating,
-                                                            tokenUsage = tokenUsage
+                                                            tokenUsage = tokenUsage,
+                                                            modelName = settings.currentModel
                                                         )
                                                         newMessages[aiMessageIndex] = updatedMessage
                                                         messages.value = newMessages
@@ -528,7 +530,8 @@ fun ChatPanel() {
                                                             content = aiMessage.content,
                                                             timestamp = aiMessage.timestamp,
                                                             isGenerating = aiMessage.isGenerating,
-                                                            tokenUsage = Pair(inputTokens, outputTokens)
+                                                            tokenUsage = Pair(inputTokens, outputTokens),
+                                                            modelName = settings.currentModel
                                                         )
                                                         newMessages[aiMessageIndex] = updatedAiMessage
                                                         messages.value = newMessages
@@ -593,7 +596,8 @@ fun ChatPanel() {
                                                     content = currentContent,
                                                     timestamp = aiMessageTimestamp,
                                                     isGenerating = isGenerating,
-                                                    tokenUsage = tokenUsage
+                                                    tokenUsage = tokenUsage,
+                                                    modelName = settings.currentModel
                                                 )
                                                 newMessages[aiMessageIndex] = updatedMessage
                                                 
@@ -988,6 +992,13 @@ private fun AiMessageItem(message: AiMessage) {
                     Text(
                         text = "生成中...",
                         style = JewelTheme.defaultTextStyle.copy(color = Color.Gray, fontSize = 12.sp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                message.modelName?.let {
+                    Text(
+                        text = it,
+                        style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF4CAF50), fontSize = 10.sp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                 }
@@ -1573,7 +1584,8 @@ class AiMessage(
     override val content: String,
     override val timestamp: LocalDateTime,
     var isGenerating: Boolean = false,
-    var tokenUsage: Pair<Int, Int>? = null
+    var tokenUsage: Pair<Int, Int>? = null,
+    var modelName: String? = null
 ) : ChatMessage(id, content, timestamp)
 
 // 工具调用消息
@@ -1599,7 +1611,7 @@ fun ChatStateService.MessageState.toChatMessage(): ChatMessage {
     val dateTime = if (timestamp.isNotEmpty()) timestamp.toLocalDateTime() else LocalDateTime.now()
     return when (type) {
         "user" -> UserMessage(id, content, dateTime)
-        "ai" -> AiMessage(id, content, dateTime, isGenerating, if (inputTokens > 0 || outputTokens > 0) Pair(inputTokens, outputTokens) else null)
+        "ai" -> AiMessage(id, content, dateTime, isGenerating, if (inputTokens > 0 || outputTokens > 0) Pair(inputTokens, outputTokens) else null, modelName)
         "tool" -> ToolCallMessage(
             id = id,
             toolName = toolName,
@@ -1636,7 +1648,8 @@ fun ChatMessage.toMessageState(): ChatStateService.MessageState {
             isGenerating = isGenerating,
             inputTokens = tokenUsage?.first ?: 0,
             outputTokens = tokenUsage?.second ?: 0,
-            totalTokens = (tokenUsage?.first ?: 0) + (tokenUsage?.second ?: 0)
+            totalTokens = (tokenUsage?.first ?: 0) + (tokenUsage?.second ?: 0),
+            modelName = modelName
         )
         is ToolCallMessage -> ChatStateService.MessageState(
             id = id,

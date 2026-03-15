@@ -33,7 +33,8 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
         var isGenerating: Boolean = false,
         var inputTokens: Int = 0,
         var outputTokens: Int = 0,
-        var totalTokens: Int = 0
+        var totalTokens: Int = 0,
+        var modelName: String? = null
     )
     
     data class State(
