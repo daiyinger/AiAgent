@@ -279,6 +279,11 @@ class AiAgentService {
            - 使用edit_file工具进行修改
            - 提供修改的详细说明
         
+        4. 当用户要求编译项目时：
+           - 优先使用compile_project工具的mode=assemble参数进行编译，速度更快且避免测试干扰
+           - 仅在需要运行测试和代码检查时使用mode=build
+           - 如果遇到构建问题，先使用mode=clean清理，然后再使用mode=assemble
+        
         对话历史：
         $historyText
         

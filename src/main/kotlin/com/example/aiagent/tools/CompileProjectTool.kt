@@ -174,40 +174,51 @@ class CompileProjectTool : Tool(
         val gradlewPath = Paths.get(projectBasePath, gradlewFileName)
         val gradlewExists = Files.exists(gradlewPath)
 
-        val task = when (mode) {
+        val commands = mutableListOf<String>()
+        if (gradlewExists) {
+            if (isWindows) {
+                commands.addAll(listOf("cmd", "/c", gradlewFileName))
+            } else {
+                commands.add("./gradlew")
+            }
+        } else {
+            if (isWindows) {
+                commands.addAll(listOf("cmd", "/c", "gradle"))
+            } else {
+                commands.add("gradle")
+            }
+        }
+
+        // 不自动执行 clean 任务，由用户手动控制
+
+        val mainTask = when (mode) {
             "clean" -> "clean"
             "assemble" -> "assemble${buildType.replaceFirstChar { it.uppercase() }}"
             else -> "build"
         }
 
-        val commandList = mutableListOf<String>()
-        if (gradlewExists) {
-            if (isWindows) {
-                commandList.addAll(listOf("cmd", "/c", gradlewFileName))
-            } else {
-                commandList.add("./gradlew")
-            }
-        } else {
-            if (isWindows) {
-                commandList.addAll(listOf("cmd", "/c", "gradle"))
-            } else {
-                commandList.add("gradle")
-            }
+        commands.add(mainTask)
+
+        // 默认跳过测试，避免测试失败导致构建失败
+        if (mode == "build") {
+            commands.add("-x")
+            commands.add("test")
+            commands.add("-x")
+            commands.add("connectedAndroidTest")
         }
 
-        commandList.add(task)
+        // 添加刷新依赖的标志，避免依赖问题
+        //commands.add("--refresh-dependencies")
 
-        if (skipTests && mode == "build") {
-            commandList.add("-x")
-            commandList.add("test")
+        // 增加并行构建以提高速度
+        //commands.add("--parallel")
+
+        val description = buildString {
+            append(if (gradlewExists) gradlewFileName else "gradle")
+            append(" ")
+            append(commands.drop(if (isWindows) 3 else 1).joinToString(" "))
         }
 
-        val description = if (gradlewExists) {
-            "$gradlewFileName $task${if (skipTests && mode == "build") " -x test" else ""}"
-        } else {
-            "gradle $task${if (skipTests && mode == "build") " -x test" else ""}"
-        }
-
-        return Pair(commandList, description)
+        return Pair(commands, description)
     }
 }

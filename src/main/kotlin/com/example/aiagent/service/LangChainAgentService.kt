@@ -631,6 +631,11 @@ class LangChainAgentService(private val project: Project) {
             - analyzeProject(): 分析项目结构
             - compileProject(mode): 编译项目，mode可选值：build（完整构建）、assemble（仅组装）、clean（清理构建）
             
+            编译建议：
+            - 优先使用 mode=assemble 进行编译，速度更快且避免测试干扰
+            - 仅在需要运行测试和代码检查时使用 mode=build
+            - 如果遇到构建问题，先使用 mode=clean 清理，然后再使用 mode=assemble
+            
             重要提示：
             - 请记住对话历史，保持上下文的连贯性
             - 当用户询问之前的问题时，请参考对话历史回答
