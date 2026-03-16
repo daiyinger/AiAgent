@@ -363,7 +363,7 @@ fun ChatPanel() {
                             when (message) {
                                 is UserMessage -> UserMessageItem(message)
                                 is AiMessage -> AiMessageItem(message)
-                                is ToolCallMessage -> ToolCallMessageItem(message)
+                                is ToolCallMessage -> ToolCallMessageItem(message, scrollState)
                                 is TokenUsageMessage -> TokenUsageMessageItem(message)
                             }
                             if (index < messages.value.size - 1) {
@@ -1086,7 +1086,7 @@ private fun AiMessageItem(message: AiMessage) {
 }
 
 @Composable
-private fun ToolCallMessageItem(message: ToolCallMessage) {
+private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.compose.foundation.ScrollState? = null) {
     var isExpanded by remember { mutableStateOf(message.output.isNotEmpty() && message.toolName == "compileProject") }
     
     // 当编译工具产生新输出时自动展开，执行完成后自动折叠
@@ -1097,6 +1097,16 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
             } else if (!message.isExecuting) {
                 isExpanded = false
             }
+        }
+    }
+    
+    // 当编译输出展开时，滚动到底部
+    LaunchedEffect(isExpanded) {
+        if (isExpanded && (message.toolName == "compileProject" || message.toolName == "compile_project")) {
+            // 延迟一下让Compose有时间计算新的布局
+            delay(100)
+            // 滚动到底部
+            scrollState?.animateScrollTo(scrollState.maxValue)
         }
     }
     
