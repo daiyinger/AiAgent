@@ -2,31 +2,40 @@
 
 一个专为Android Studio开发的AI辅助工具插件，帮助开发者分析、理解和优化Android项目。
 
+## 版本信息
+
+当前版本：1.0-SNAPSHOT
+
 ## 功能特性
 
 ### 🔍 智能项目分析
-- **项目结构分析**：自动分析Android项目的目录结构和文件组织
-- **依赖分析**：分析项目的build.gradle文件，识别依赖关系
-- **源代码分析**：分析关键Kotlin/Java源代码文件
-- **Manifest分析**：分析AndroidManifest.xml文件，识别组件和权限
+- **项目结构分析**：自动分析Android项目的目录结构和文件组织，生成可视化的项目结构树
+- **依赖分析**：深入分析项目的build.gradle文件，识别依赖关系，检测潜在的依赖冲突
+- **源代码分析**：分析关键Kotlin/Java源代码文件，识别代码结构和潜在问题
+- **Manifest分析**：分析AndroidManifest.xml文件，识别组件、权限和配置信息
+- **资源文件分析**：分析res目录下的资源文件，包括布局、字符串、图片等
 
 ### 🛠️ 强大的工具集
-- **文件操作**：读取、编辑项目文件
-- **项目构建**：执行Gradle构建命令
-- **文件搜索**：在项目中搜索文件
-- **目录浏览**：列出目录中的文件，支持文件类型过滤
+- **文件操作**：读取、编辑项目文件，支持代码高亮和语法检查
+- **项目构建**：执行Gradle构建命令，查看构建输出和错误信息
+- **文件搜索**：在项目中搜索文件和代码，支持正则表达式
+- **目录浏览**：列出目录中的文件，支持文件类型过滤和排序
+- **编译分析**：分析项目编译过程，识别编译错误和警告
 
 ### 💬 智能对话
-- **流式响应**：支持大模型的流式输出，实时显示回复
-- **工具调用**：AI可以自动调用工具执行任务
-- **多轮对话**：支持连续的对话和分析
-- **消息历史**：保存对话历史，便于参考
+- **流式响应**：支持大模型的流式输出，实时显示回复，提供更好的用户体验
+- **工具调用**：AI可以自动调用工具执行任务，无需手动操作
+- **多轮对话**：支持连续的对话和分析，保持上下文连贯性
+- **消息历史**：保存对话历史，便于参考和继续之前的对话
+- **代码解释**：AI可以解释复杂的代码逻辑，提供详细的代码分析
 
 ### 🎨 现代化UI
-- **深色主题**：支持Android Studio的深色主题
-- **响应式布局**：适配不同屏幕尺寸
-- **文本选择**：支持对话文本的选择和复制
-- **模型选择**：支持多种AI模型
+- **深色主题**：支持Android Studio的深色主题，减少眼部疲劳
+- **响应式布局**：适配不同屏幕尺寸，在各种设备上都能良好显示
+- **文本选择**：支持对话文本的选择和复制，方便分享和保存
+- **模型选择**：支持多种AI模型，可根据需求选择合适的模型
+- **自定义设置**：支持个性化配置，包括字体大小、颜色主题等
+- **实时反馈**：操作过程中提供实时反馈，增强用户体验
 
 ## 安装方法
 
@@ -48,14 +57,22 @@
 ## 使用指南
 
 ### 基本使用
-1. 打开Android Studio
-2. 在右侧边栏点击 "AI Agent" 标签
-3. 在输入框中输入您的问题，例如：
-   - "分析当前工程"
-   - "查看MainActivity.kt文件"
-   - "分析项目依赖"
-4. 点击发送按钮或按Enter键
-5. AI会分析您的请求并提供响应
+1. **打开Android Studio**：启动Android Studio并打开您的项目
+2. **打开AI Agent面板**：在右侧边栏点击 "AI Agent" 标签，打开插件面板
+3. **选择模型**：在面板顶部的模型选择器中选择您要使用的AI模型（默认使用已配置的默认模型）
+4. **输入问题**：在输入框中输入您的问题，例如：
+   - "分析当前工程的结构和依赖"
+   - "查看app/src/main/java/com/example/MainActivity.kt文件"
+   - "分析项目的build.gradle文件，检测依赖冲突"
+   - "解释app/src/main/java/com/example/utils/Helper.kt中的代码逻辑"
+   - "查找项目中所有使用RecyclerView的文件"
+5. **发送请求**：点击发送按钮或按Enter键提交您的问题
+6. **查看响应**：AI会分析您的请求并提供详细的响应，包括：
+   - 项目分析结果
+   - 文件内容和解释
+   - 代码优化建议
+   - 工具执行结果
+7. **继续对话**：您可以基于AI的响应继续提问，AI会保持上下文连贯性
 
 ### 高级功能
 
@@ -116,12 +133,62 @@ A: 这是因为大模型在生成回复时可能会分多个chunk发送，系统
 
 ## 技术架构
 
-- **开发语言**：Kotlin
+- **开发语言**：Kotlin 2.1.20
 - **UI框架**：JetBrains Compose
 - **构建工具**：Gradle
+- **IntelliJ Platform**：2.10.2
+- **JVM版本**：21
+- **依赖库**：
+  - org.json:json:20240303
+  - dev.langchain4j:langchain4j:0.36.2
+  - dev.langchain4j:langchain4j-open-ai:0.36.2
+  - dev.langchain4j:langchain4j-ollama:0.36.2
 - **API客户端**：Java HTTP Client
 - **状态管理**：JetBrains Compose State
 - **配置持久化**：IntelliJ Platform PersistentStateComponent
+
+## 项目结构
+
+```
+AiAgent/
+├── src/
+│   ├── main/
+│   │   ├── kotlin/
+│   │   │   └── com/example/aiagent/
+│   │   │       ├── service/
+│   │   │       │   ├── AiAgentService.kt
+│   │   │       │   ├── ChatStateService.kt
+│   │   │       │   ├── LangChainAgentService.kt
+│   │   │       │   └── LogService.kt
+│   │   │       ├── settings/
+│   │   │       │   └── AiAgentSettings.kt
+│   │   │       ├── tools/
+│   │   │       │   ├── AndroidProjectAnalysisTool.kt
+│   │   │       │   ├── BuildTool.kt
+│   │   │       │   ├── CompileProjectTool.kt
+│   │   │       │   ├── EditFileTool.kt
+│   │   │       │   ├── ListFilesTool.kt
+│   │   │       │   ├── ReadFileTool.kt
+│   │   │       │   ├── SearchFilesTool.kt
+│   │   │       │   ├── Tool.kt
+│   │   │       │   └── ToolManager.kt
+│   │   │       ├── ui/
+│   │   │       │   ├── ChatPanel.kt
+│   │   │       │   └── SettingsPanel.kt
+│   │   │       ├── MyMessageBundle.kt
+│   │   │       └── MyToolWindow.kt
+│   │   └── resources/
+│   │       ├── META-INF/
+│   │       │   ├── plugin.xml
+│   │       │   └── pluginIcon.svg
+│   │       └── messages/
+│   │           └── MyMessageBundle.properties
+├── build.gradle.kts
+├── gradle.properties
+├── gradlew
+├── gradlew.bat
+└── settings.gradle.kts
+```
 
 ## 贡献
 
