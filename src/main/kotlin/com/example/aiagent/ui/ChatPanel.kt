@@ -321,18 +321,23 @@ fun ChatPanel() {
                     val listState = rememberLazyListState()
                     val coroutineScope = rememberCoroutineScope()
                     var autoScrollEnabled by remember { mutableStateOf(true) }
+                    var userScrolled by remember { mutableStateOf(false) }
 
+                    // 监听用户滚动行为
                     LaunchedEffect(listState) {
-                        snapshotFlow { listState.layoutInfo }
-                            .map { info ->
-                                val total = info.totalItemsCount
-                                if (total == 0) return@map true
-                                val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-                                lastVisible >= total - 2
-                            }
+                        snapshotFlow { listState.firstVisibleItemIndex }
                             .distinctUntilChanged()
-                            .collectLatest { atBottom ->
-                                autoScrollEnabled = atBottom
+                            .collect {
+                                // 如果用户滚动到了不是最底部的位置，标记为用户主动滚动
+                                val total = uiState.messages.size
+                                if (total > 0 && it < total - 3) {
+                                    userScrolled = true
+                                    autoScrollEnabled = false
+                                } else if (it >= total - 2) {
+                                    // 用户回到底部，重新启用自动滚动
+                                    userScrolled = false
+                                    autoScrollEnabled = true
+                                }
                             }
                     }
 
@@ -354,10 +359,13 @@ fun ChatPanel() {
                                 is ToolCallMessage -> ToolCallMessageItem(
                                     message = message,
                                     onExpand = {
-                                        // 当消息框展开或编译状态变化时，强制滚动到底部，确保最新结果可见
-                                        coroutineScope.launch {
-                                            if (uiState.messages.isNotEmpty()) {
-                                                listState.scrollToItem(uiState.messages.size - 1)
+                                        // 只有当用户当前在底部附近且没有主动滚动时，才滚动到底部
+                                        // 这样用户可以自由查看历史消息，不会被强制滚动
+                                        val total = uiState.messages.size
+                                        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                                        if (total > 0 && lastVisible >= total - 2 && !userScrolled) {
+                                            coroutineScope.launch {
+                                                listState.scrollToItem(total - 1)
                                             }
                                         }
                                     }
@@ -375,8 +383,9 @@ fun ChatPanel() {
                     }
 
                     // 自动滚动到最新消息
-                    LaunchedEffect(uiState.messages.size, autoScrollEnabled) {
-                        if (autoScrollEnabled && uiState.messages.isNotEmpty()) {
+                    LaunchedEffect(uiState.messages.size) {
+                        // 只有当autoScrollEnabled为true且用户没有主动滚动时才滚动
+                        if (autoScrollEnabled && !userScrolled && uiState.messages.isNotEmpty()) {
                             // 滚动到最后一条消息，并为长消息预留一点空间
                             listState.scrollToItem(
                                 index = uiState.messages.size - 1,
@@ -868,10 +877,11 @@ private fun ToolCallMessageItem(message: ToolCallMessage, onExpand: () -> Unit =
         if (message.toolName == "compileProject") {
             if (message.isExecuting && message.output.isNotEmpty()) {
                 isExpanded = true
+                // 只有在执行中且有新输出时才滚动到底部
                 onExpand()
             } else if (!message.isExecuting) {
                 isExpanded = false
-                onExpand()
+                // 执行结束时不滚动，避免干扰用户查看历史消息
             }
         }
     }
