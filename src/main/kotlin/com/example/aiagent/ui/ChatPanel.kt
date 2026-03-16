@@ -145,19 +145,15 @@ fun ChatPanel() {
         backgroundColor = Color(0xFF007ACC).copy(alpha = 0.4f)
     )
     
-    val listState = rememberLazyListState()
+    val scrollState = rememberScrollState()
     
     // 滚动到最新消息
     LaunchedEffect(messages.value.size) {
         if (messages.value.isNotEmpty()) {
-            // 优先滚动到最新的工具调用消息（如果有）
-            val lastToolCallIndex = messages.value.indexOfLast { it is ToolCallMessage }
-            if (lastToolCallIndex >= 0) {
-                listState.animateScrollToItem(lastToolCallIndex)
-            } else {
-                // 否则滚动到最后一条消息
-                listState.animateScrollToItem(messages.value.size - 1)
-            }
+            log("滚动到最新消息，消息数量: ${messages.value.size}")
+            // 延迟一下让Compose有时间计算新的布局
+            delay(100)
+            scrollState.animateScrollTo(scrollState.maxValue)
         }
     }
     
@@ -357,25 +353,28 @@ fun ChatPanel() {
                 Box(
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(scrollState)
+                            .padding(8.dp)
                     ) {
-                        items(messages.value) {
-                            when (it) {
-                                is UserMessage -> UserMessageItem(it)
-                                is AiMessage -> AiMessageItem(it)
-                                is ToolCallMessage -> ToolCallMessageItem(it)
-                                is TokenUsageMessage -> TokenUsageMessageItem(it)
+                        messages.value.forEachIndexed { index, message ->
+                            when (message) {
+                                is UserMessage -> UserMessageItem(message)
+                                is AiMessage -> AiMessageItem(message)
+                                is ToolCallMessage -> ToolCallMessageItem(message)
+                                is TokenUsageMessage -> TokenUsageMessageItem(message)
+                            }
+                            if (index < messages.value.size - 1) {
+                                Spacer(modifier = Modifier.height(12.dp))
                             }
                         }
                     }
                     
                     VerticalScrollbar(
                         modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
-                        adapter = rememberScrollbarAdapter(listState),
+                        adapter = rememberScrollbarAdapter(scrollState),
                         style = androidx.compose.foundation.ScrollbarStyle(
                             minimalHeight = 16.dp,
                             thickness = 8.dp,
@@ -496,25 +495,32 @@ fun ChatPanel() {
                                                 log("收到LangChain4j消息chunk: ${chunk.take(50)}...")
                                                 currentContent += chunk
                                                 isGenerating = true
-                                                
+                                            },
+                                            onComplete = {
+                                                log("响应完成，更新AI消息，内容长度: ${currentContent.length}")
                                                 CoroutineScope(Dispatchers.Main).launch {
                                                     val newMessages = messages.value.toMutableList()
                                                     // 查找AI消息的索引，而不是使用size - 1
                                                     val aiMessageIndex = newMessages.indexOfFirst { it is AiMessage && it.id == aiMessageId }
                                                     if (aiMessageIndex >= 0) {
+                                                        log("找到AI消息索引: $aiMessageIndex")
                                                         val updatedMessage = AiMessage(
                                                             id = aiMessageId,
                                                             content = currentContent,
                                                             timestamp = aiMessageTimestamp,
-                                                            isGenerating = isGenerating,
+                                                            isGenerating = false,
                                                             tokenUsage = tokenUsage,
                                                             modelName = settings.currentModel
                                                         )
                                                         newMessages[aiMessageIndex] = updatedMessage
                                                         messages.value = newMessages
+                                                        log("更新消息后，消息数量: ${newMessages.size}")
                                                         
-                                                        // 每次AI消息内容更新后，滚动到最新消息
-                                                        listState.scrollToItem(newMessages.size - 1)
+                                                        // 滚动到最新消息
+                                                        log("响应完成后滚动到底部")
+                                                        // 延迟一下让Compose有时间计算新的布局
+                                                        delay(100)
+                                                        scrollState.animateScrollTo(scrollState.maxValue)
                                                     }
                                                 }
                                             },
@@ -576,7 +582,7 @@ fun ChatPanel() {
                                                         messages.value = newMessages
                                                         
                                                         // 滚动到最新的消息
-                                                        listState.scrollToItem(newMessages.size - 1)
+                                                        scrollState.animateScrollTo(scrollState.maxValue)
                                                         
                                                         // 更新 ChatStateService 中的 token 统计信息
                                                         val currentSession = chatStateService.currentSession
@@ -616,7 +622,7 @@ fun ChatPanel() {
                                                         )
                                                         
                                                         // 滚动到更新的工具调用消息的底部
-                                                        listState.scrollToItem(toolCallIndex)
+                                                        scrollState.animateScrollTo(scrollState.maxValue)
                                                     } else {
                                                         // 如果没有找到，记录日志
                                                         log("未找到工具调用: $toolName")
@@ -665,11 +671,12 @@ fun ChatPanel() {
                                             
                                             messages.value = newMessages
                                             
-                                            // 延迟一下让Compose有时间计算新的布局，然后滚动到最新的消息
+                                            // 延迟一下让Compose有时间计算新的布局，然后滚动到底部
                                             CoroutineScope(Dispatchers.Main).launch {
                                                 delay(200)
                                                 if (newMessages.isNotEmpty()) {
-                                                    listState.scrollToItem(newMessages.size - 1)
+                                                    log("消息完成后滚动到底部")
+                                                    scrollState.animateScrollTo(scrollState.maxValue)
                                                 }
                                             }
                                             
@@ -1027,7 +1034,7 @@ private fun AiMessageItem(message: AiMessage) {
             modifier = Modifier
                 .fillMaxWidth(0.9f)
                 .background(Color(0xFF2D2D2D), RoundedCornerShape(12.dp))
-                .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)
+                .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
         ) {
             SelectionContainer {
                 Text(
@@ -1035,33 +1042,40 @@ private fun AiMessageItem(message: AiMessage) {
                     style = JewelTheme.defaultTextStyle.copy(color = Color.White)
                 )
             }
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (message.isGenerating) {
-                    Text(
-                        text = "生成中...",
-                        style = JewelTheme.defaultTextStyle.copy(color = Color.Gray, fontSize = 12.sp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
+                Box(modifier = Modifier.height(16.dp)) {
+                    if (message.isGenerating) {
+                        Text(
+                            text = "生成中...",
+                            style = JewelTheme.defaultTextStyle.copy(color = Color.Gray, fontSize = 12.sp)
+                        )
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            message.modelName?.let {
+                                Text(
+                                    text = it,
+                                    style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF4CAF50), fontSize = 10.sp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+                            message.tokenUsage?.let {
+                                Text(
+                                    text = "Tokens: in ${it.first}/out ${it.second}",
+                                    style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+                        }
+                    }
                 }
-                message.modelName?.let {
-                    Text(
-                        text = it,
-                        style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF4CAF50), fontSize = 10.sp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
-                message.tokenUsage?.let {
-                    Text(
-                        text = "Tokens: in ${it.first}/out ${it.second}",
-                        style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = message.timestamp.format(DateTimeFormatter.ofPattern("HH:mm")),
                     style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp)

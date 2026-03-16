@@ -415,6 +415,7 @@ class LangChainAgentService(private val project: Project) {
         message: String,
         onChunk: (String) -> Unit,
         onToolCall: (ToolCallMessage) -> Unit,
+        onComplete: () -> Unit = {},
         onTokenUsage: (Int, Int) -> Unit = { _, _ -> },
         onToolOutput: ((String, String) -> Unit)? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
@@ -450,6 +451,8 @@ class LangChainAgentService(private val project: Project) {
                         Thread.sleep(5)
                         onChunk(char.toString())
                     }
+                    // 缓存响应发送完成后调用onComplete
+                    onComplete()
                 }
                 return@withContext Result.success(Unit)
             }
@@ -588,6 +591,8 @@ class LangChainAgentService(private val project: Project) {
                     Thread.sleep(5) // 模拟网络延迟，使用更短的延迟
                     onChunk(char.toString())
                 }
+                // 响应发送完成后调用onComplete
+                onComplete()
             }
 
             Result.success(Unit)
