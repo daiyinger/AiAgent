@@ -6,11 +6,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -343,21 +346,30 @@ fun ChatPanel() {
                     )
                 }
             } else {
-                LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(messages.value) {
-                    when (it) {
-                        is UserMessage -> UserMessageItem(it)
-                        is AiMessage -> AiMessageItem(it)
-                        is ToolCallMessage -> ToolCallMessageItem(it)
-                        is TokenUsageMessage -> TokenUsageMessageItem(it)
+                Box(
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(messages.value) {
+                            when (it) {
+                                is UserMessage -> UserMessageItem(it)
+                                is AiMessage -> AiMessageItem(it)
+                                is ToolCallMessage -> ToolCallMessageItem(it)
+                                is TokenUsageMessage -> TokenUsageMessageItem(it)
+                            }
+                        }
                     }
+                    
+                    VerticalScrollbar(
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                        adapter = rememberScrollbarAdapter(listState)
+                    )
                 }
-            }
             }
         }
         
@@ -365,7 +377,7 @@ fun ChatPanel() {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp)
+                .padding(vertical = 8.dp)
                 .border(1.dp, Color.Gray, RoundedCornerShape(8.dp))
                 .background(Color(0xFF2D2D2D))
         ) {
@@ -1047,10 +1059,14 @@ private fun AiMessageItem(message: AiMessage) {
 private fun ToolCallMessageItem(message: ToolCallMessage) {
     var isExpanded by remember { mutableStateOf(message.output.isNotEmpty() && message.toolName == "compileProject") }
     
-    // 当编译工具产生新输出时自动展开
-    LaunchedEffect(message.output) {
-        if (message.output.isNotEmpty() && message.toolName == "compileProject") {
-            isExpanded = true
+    // 当编译工具产生新输出时自动展开，执行完成后自动折叠
+    LaunchedEffect(message.output, message.isExecuting) {
+        if (message.toolName == "compileProject" || message.toolName == "compile_project") {
+            if (message.output.isNotEmpty() && message.isExecuting) {
+                isExpanded = true
+            } else if (!message.isExecuting) {
+                isExpanded = false
+            }
         }
     }
     
@@ -1246,6 +1262,78 @@ private fun ToolCallMessageItem(message: ToolCallMessage) {
                                     )
                                 }
                             }
+                        }
+                    } else if (message.toolName == "compileProject" || message.toolName == "compile_project") {
+                        // 显示编译参数
+                        val mode = message.parameters["mode"] as? String ?: "build"
+                        val buildType = message.parameters["build_type"] as? String ?: "debug"
+                        val skipTests = message.parameters["skip_tests"] as? Boolean ?: false
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = mode,
+                                style = JewelTheme.defaultTextStyle.copy(
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            )
+                            Text(
+                                text = "/",
+                                style = JewelTheme.defaultTextStyle.copy(
+                                    color = Color.LightGray,
+                                    fontSize = 11.sp
+                                )
+                            )
+                            Text(
+                                text = buildType,
+                                style = JewelTheme.defaultTextStyle.copy(
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            )
+                            if (skipTests) {
+                                Text(
+                                    text = "(跳过测试)",
+                                    style = JewelTheme.defaultTextStyle.copy(
+                                        color = Color.LightGray,
+                                        fontSize = 10.sp
+                                    )
+                                )
+                            }
+                        }
+                    } else if (message.toolName == "searchFiles" || message.toolName == "search_files") {
+                        // 显示搜索参数
+                        val pattern = message.parameters["pattern"] as? String ?: ""
+                        val maxResults = message.parameters["max_results"] as? Number ?: 20
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = pattern,
+                                style = JewelTheme.defaultTextStyle.copy(
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "(max: $maxResults)",
+                                style = JewelTheme.defaultTextStyle.copy(
+                                    color = Color.LightGray,
+                                    fontSize = 10.sp
+                                )
+                            )
                         }
                     }
                 }
