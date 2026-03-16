@@ -15,20 +15,50 @@ import dev.langchain4j.model.output.Response
 import dev.langchain4j.service.AiServices
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 使用LangChain4j实现的AI Agent服务
  * 提供更稳定的工具调用和流式响应处理
  */
 class LangChainAgentService(private val project: Project) {
-    
+
     private fun log(message: String) {
         LogService.log(message)
     }
+
+    // 当前正在进行的请求任务
+    private var currentJob: Job? = null
+
+    // 取消标志
+    private val isCancelled = AtomicBoolean(false)
+
+    /**
+     * 停止当前正在进行的会话/请求
+     */
+    fun stopCurrentSession() {
+        log("停止当前会话")
+        isCancelled.set(true)
+        currentJob?.cancel()
+        currentJob = null
+    }
+
+    /**
+     * 重置取消标志，用于新会话
+     */
+    fun resetCancellation() {
+        isCancelled.set(false)
+    }
+
+    /**
+     * 检查是否已取消
+     */
+    fun isCancelled(): Boolean = isCancelled.get()
     
     /**
      * LangChain4j Agent接口
@@ -389,8 +419,14 @@ class LangChainAgentService(private val project: Project) {
         onToolOutput: ((String, String) -> Unit)? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            // 检查是否已取消
+            if (isCancelled.get()) {
+                log("请求已取消，不发送消息")
+                return@withContext Result.failure(Exception("Request cancelled"))
+            }
+
             log("发送消息: ${message.take(100)}...")
-            
+
             // 检查缓存
             val cachedResponse = checkCache(message)
             if (cachedResponse != null) {
@@ -398,28 +434,32 @@ class LangChainAgentService(private val project: Project) {
                 // 估算token数
                 val estimatedInputTokens = estimateTokenCount(message)
                 val estimatedOutputTokens = estimateTokenCount(cachedResponse)
-                
+
                 // 通知token使用情况
                 ApplicationManager.getApplication().invokeLater {
                     onTokenUsage(estimatedInputTokens, estimatedOutputTokens)
                 }
-                
+
                 // 流式发送缓存的响应
                 ApplicationManager.getApplication().invokeLater {
                     cachedResponse.forEach { char ->
+                        if (isCancelled.get()) {
+                            log("缓存响应发送已取消")
+                            return@invokeLater
+                        }
                         Thread.sleep(5)
                         onChunk(char.toString())
                     }
                 }
                 return@withContext Result.success(Unit)
             }
-            
+
             // 构建系统提示
             val systemPrompt = buildSystemPrompt()
-            
+
             // 工具调用ID映射，用于跟踪正在执行的工具调用
             val toolCallIds = mutableMapOf<String, String>()
-            
+
             // 创建工具调用回调
             val toolCallCallback: (String, String, String) -> Unit = { toolName, paramsStr, status ->
                 log("工具调用: $toolName, 参数: $paramsStr, 状态: $status")
@@ -446,15 +486,15 @@ class LangChainAgentService(private val project: Project) {
                         // 如果解析失败，使用原始参数字符串
                         parameters["params"] = paramsStr
                     }
-                    
+
                     // 生成或获取工具调用ID
                     val toolCallKey = "$toolName-${paramsStr.take(50)}" // 使用工具名和参数的前50个字符作为键
                     val toolCallId = toolCallIds.getOrPut(toolCallKey) { System.currentTimeMillis().toString() }
-                    
+
                     // 查找是否已经存在该工具调用消息，以保留之前的输出
                     var existingOutput = ""
                     // 这里暂时无法直接访问 UI 中的消息列表，所以我们依赖 chatStateService 来保存输出
-                    
+
                     val toolCallMessage = ToolCallMessage(
                         id = toolCallId,
                         toolName = toolName,
@@ -465,26 +505,26 @@ class LangChainAgentService(private val project: Project) {
                         output = existingOutput
                     )
                     onToolCall(toolCallMessage)
-                    
+
                     // 如果工具调用完成或失败，从映射中移除，这样下次相同工具调用会创建新的框
                     if (status == "成功" || status.startsWith("失败:")) {
                         toolCallIds.remove(toolCallKey)
                     }
                 }
             }
-            
+
             // 构建Agent并获取TokenCapturingChatLanguageModel
             val (agent, tokenCapturingModel) = buildAgent(toolCallCallback, onToolOutput)
-            
+
             // 获取对话历史
             val chatStateService = ChatStateService.instance
             val history = chatStateService.currentSession?.messages ?: emptyList()
-            
+
             log("获取到 ${history.size} 条历史消息")
             history.forEachIndexed { index, msg ->
                 log("历史消息 $index: type=${msg.type}, content=${msg.content.take(50)}...")
             }
-            
+
             // 构建对话历史文本
             val historyText = buildString {
                 history.forEach { msg ->
@@ -502,49 +542,54 @@ class LangChainAgentService(private val project: Project) {
                     }
                 }
             }
-            
+
             log("构建的对话历史: ${historyText.take(200)}...")
-            
+
             // 构建完整消息
             val fullMessage = if (historyText.isNotEmpty()) {
                 "$systemPrompt\n\n对话历史:\n$historyText\n\n用户: $message"
             } else {
                 "$systemPrompt\n\n用户: $message"
             }
-            
+
             // 估算输入token数
             val estimatedInputTokens = estimateTokenCount(fullMessage)
             log("估算输入token数: $estimatedInputTokens")
-            
+
             // 发送消息并获取响应
             val response = agent.chat(fullMessage)
-            
+
             // 添加到缓存
             addToCache(message, response)
-            
+
             // 获取实际的token使用情况
             val tokenUsage = tokenCapturingModel.tokenUsage
             val actualInputTokens = tokenUsage?.promptTokens ?: estimatedInputTokens
             val actualOutputTokens = tokenUsage?.completionTokens ?: estimateTokenCount(response)
-            
+
             log("实际Token使用情况: 输入=$actualInputTokens, 输出=$actualOutputTokens")
-            
+
             // 通知token使用情况
             ApplicationManager.getApplication().invokeLater {
                 onTokenUsage(actualInputTokens, actualOutputTokens)
             }
-            
+
             log("收到响应: ${response.take(100)}...")
-            
+
             // 发送响应（模拟流式）
             ApplicationManager.getApplication().invokeLater {
                 // 模拟流式发送，每次发送一个字符
                 response.forEach { char ->
+                    // 检查是否已取消
+                    if (isCancelled.get()) {
+                        log("响应发送已取消")
+                        return@invokeLater
+                    }
                     Thread.sleep(5) // 模拟网络延迟，使用更短的延迟
                     onChunk(char.toString())
                 }
             }
-            
+
             Result.success(Unit)
         } catch (e: Exception) {
             log("发送消息错误: ${e.message}")
@@ -614,6 +659,14 @@ class LangChainAgentService(private val project: Project) {
         if (message.length < 200) {
             messageCache[message] = response
         }
+    }
+
+    /**
+     * 清除消息缓存，用于新建会话时
+     */
+    fun clearCache() {
+        log("清除消息缓存")
+        messageCache.clear()
     }
     
     /**

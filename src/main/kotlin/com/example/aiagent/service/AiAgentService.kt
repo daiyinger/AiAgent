@@ -5,6 +5,7 @@ import com.example.aiagent.tools.ToolManager
 import com.example.aiagent.tools.ToolResult
 import com.intellij.openapi.project.ProjectManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.json.JSONArray
@@ -13,16 +14,45 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import com.intellij.openapi.application.ApplicationManager
+import java.util.concurrent.atomic.AtomicBoolean
 
 class AiAgentService {
-    
+
     private val httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(30))
         .build()
-    
+
     private fun log(message: String) {
         LogService.log(message)
     }
+
+    // 当前正在进行的请求任务
+    private var currentJob: Job? = null
+
+    // 取消标志
+    private val isCancelled = AtomicBoolean(false)
+
+    /**
+     * 停止当前正在进行的会话/请求
+     */
+    fun stopCurrentSession() {
+        log("停止当前会话")
+        isCancelled.set(true)
+        currentJob?.cancel()
+        currentJob = null
+    }
+
+    /**
+     * 重置取消标志，用于新会话
+     */
+    fun resetCancellation() {
+        isCancelled.set(false)
+    }
+
+    /**
+     * 检查是否已取消
+     */
+    fun isCancelled(): Boolean = isCancelled.get()
     
     private fun buildApiUrl(provider: AiAgentSettings.Provider, endpoint: String): String {
         val baseUrl = provider.apiUrl.trimEnd('/')
@@ -377,12 +407,18 @@ class AiAgentService {
     }
     
     suspend fun sendMessageStream(
-        message: String, 
-        onChunk: (String) -> Unit, 
+        message: String,
+        onChunk: (String) -> Unit,
         onToolCall: (ToolCall) -> Unit,
         onTokenUsage: (TokenUsage?) -> Unit = {}
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            // 检查是否已取消
+            if (isCancelled.get()) {
+                log("请求已取消，不发送流式消息")
+                return@withContext Result.failure(Exception("Request cancelled"))
+            }
+
             log("开始发送流式消息: $message")
             val settings = AiAgentSettings.instance.state
             val currentProvider = settings.providers.find { it.id == settings.currentProviderId } ?: settings.providers[0]
@@ -465,10 +501,16 @@ class AiAgentService {
             var totalPromptTokens = 0
             var totalCompletionTokens = 0
             
-            lines.forEach { line ->
+            for (line in lines) {
+                // 检查是否已取消
+                if (isCancelled.get()) {
+                    log("流式响应已取消")
+                    return@withContext Result.failure(Exception("Request cancelled"))
+                }
+
                 val trimmedLine = line.trim()
                 if (trimmedLine.isEmpty()) {
-                    return@forEach
+                    continue
                 }
                 
                 try {
@@ -529,7 +571,7 @@ class AiAgentService {
                                 val data = trimmedLine.substring(6)
                                 if (data == "[DONE]") {
                                     log("OpenAI响应结束")
-                                    return@forEach
+                                    break
                                 }
                                 val json = JSONObject(data)
                                 
@@ -583,7 +625,7 @@ class AiAgentService {
                                 val data = trimmedLine.substring(6)
                                 if (data == "[DONE]") {
                                     log("响应结束")
-                                    return@forEach
+                                    break
                                 }
                                 val json = JSONObject(data)
                                 val chunk = json.optString("response", "")

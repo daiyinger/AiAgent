@@ -222,11 +222,19 @@ fun ChatPanel() {
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
+                                            // 停止当前正在进行的AI请求
+                                            langChainService?.stopCurrentSession()
+                                            // 重置取消标志，以便新会话可以正常进行
+                                            langChainService?.resetCancellation()
+                                            // 清除消息缓存，避免新会话使用旧缓存
+                                            langChainService?.clearCache()
+                                            // 创建新会话
                                             val newSession = chatStateService.createNewSession()
                                             sessions.value = chatStateService.sessions.toMutableList()
                                             currentSessionIndex = sessions.value.size - 1
                                             chatStateService.currentSessionIndex = currentSessionIndex
                                             messages.value = mutableListOf()
+                                            isSending = false
                                             expanded = false
                                         }
                                         .padding(horizontal = 8.dp, vertical = 6.dp),
