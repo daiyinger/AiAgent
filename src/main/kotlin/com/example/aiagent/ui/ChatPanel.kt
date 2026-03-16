@@ -898,7 +898,19 @@ private fun ToolCallMessageItem(message: ToolCallMessage, onExpand: () -> Unit =
     val paramSummary: String? = when (message.toolName) {
         "compileProject" -> {
             val mode = message.parameters["mode"]?.toString()?.ifBlank { null }
-            mode?.let { "mode=$it" }
+            val target = message.parameters["target"]?.toString()?.ifBlank { null }
+            val options = message.parameters["options"]?.toString()?.ifBlank { null }
+            buildString {
+                if (mode != null) append("mode=$mode")
+                if (target != null) {
+                    if (isNotEmpty()) append(", ")
+                    append("target=$target")
+                }
+                if (options != null) {
+                    if (isNotEmpty()) append(", ")
+                    append("options=$options")
+                }
+            }.ifBlank { null }
         }
         "listFiles" -> {
             val path = message.parameters["path"]?.toString()?.ifBlank { null }
@@ -991,15 +1003,6 @@ private fun ToolCallMessageItem(message: ToolCallMessage, onExpand: () -> Unit =
                             fontSize = 13.sp
                         )
                     )
-                    if (paramSummary != null) {
-                        Text(
-                            text = "($paramSummary)",
-                            style = JewelTheme.defaultTextStyle.copy(
-                                color = Color(0xFFB0BEC5),
-                                fontSize = 11.sp
-                            )
-                        )
-                    }
                     // 处理文件名和行数变化的显示
                     if (fileName != null) {
                         // 当有文件名时
@@ -1125,6 +1128,98 @@ private fun ToolCallMessageItem(message: ToolCallMessage, onExpand: () -> Unit =
                                         )
                                     )
                                 }
+                            }
+                        }
+                    } else if (message.toolName == "compileProject") {
+                        // 编译工具的参数显示，模拟editFiles的路径显示
+                        val mode = message.parameters["mode"]?.toString()?.ifBlank { null }
+                        val target = message.parameters["target"]?.toString()?.ifBlank { null }
+                        val options = message.parameters["options"]?.toString()?.ifBlank { null }
+                        val paramsText = buildString {
+                            if (mode != null) append("mode=$mode")
+                            if (target != null) {
+                                if (isNotEmpty()) append(", ")
+                                append("target=$target")
+                            }
+                            if (options != null) {
+                                if (isNotEmpty()) append(", ")
+                                append("options=$options")
+                            }
+                        }
+                        if (paramsText.isNotBlank()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = paramsText,
+                                    style = JewelTheme.defaultTextStyle.copy(
+                                        color = Color.LightGray,
+                                        fontSize = 11.sp
+                                    ),
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    } else if (message.toolName == "analyzeProject") {
+                        // 分析项目工具的参数显示，模拟editFiles的路径显示
+                        val projectPath = message.parameters["projectPath"]?.toString()?.ifBlank { null }
+                        val depth = message.parameters["depth"]?.toString()?.ifBlank { null }
+                        val paramsText = buildString {
+                            if (projectPath != null) append(projectPath)
+                            if (depth != null) {
+                                if (isNotEmpty()) append(", ")
+                                append("depth=$depth")
+                            }
+                        }
+                        if (paramsText.isNotBlank()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = paramsText,
+                                    style = JewelTheme.defaultTextStyle.copy(
+                                        color = Color.LightGray,
+                                        fontSize = 11.sp
+                                    ),
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    } else if (message.toolName == "searchFiles") {
+                        // 搜索文件工具的参数显示，模拟editFiles的路径显示
+                        val pattern = message.parameters["pattern"]?.toString()?.ifBlank { null }
+                        val maxResults = message.parameters["max_results"]?.toString()?.ifBlank { null }
+                        val paramsText = buildString {
+                            if (pattern != null) append(pattern)
+                            if (maxResults != null) {
+                                if (isNotEmpty()) append(", ")
+                                append("max=$maxResults")
+                            }
+                        }
+                        if (paramsText.isNotBlank()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = paramsText,
+                                    style = JewelTheme.defaultTextStyle.copy(
+                                        color = Color.LightGray,
+                                        fontSize = 11.sp
+                                    ),
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
                             }
                         }
                     }
