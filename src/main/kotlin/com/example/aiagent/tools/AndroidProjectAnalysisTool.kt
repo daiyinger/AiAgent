@@ -3,7 +3,6 @@ package com.example.aiagent.tools
 import com.intellij.openapi.project.Project
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
 
 class AndroidProjectAnalysisTool : Tool(
     name = "analyze_android_project",
@@ -22,11 +21,8 @@ class AndroidProjectAnalysisTool : Tool(
         
         return try {
             val projectBasePath = project.basePath ?: return ToolResult.Error("Project base path not found")
-            val targetPath = if (path.isEmpty() || path == "root") {
-                Paths.get(projectBasePath)
-            } else {
-                Paths.get(projectBasePath, path.replace("/", "\\"))
-            }
+            val targetPath = resolveFilePath(project, path)
+                ?: return ToolResult.Error("Project base path not found")
             
             if (!Files.exists(targetPath)) {
                 return ToolResult.Error("Path does not exist: $path")

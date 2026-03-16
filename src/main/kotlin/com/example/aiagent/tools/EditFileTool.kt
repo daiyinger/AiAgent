@@ -3,8 +3,9 @@ package com.example.aiagent.tools
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import java.nio.file.Paths
 
 class EditFileTool : Tool(
     name = "edit_file",
@@ -34,47 +35,37 @@ class EditFileTool : Tool(
         val path = params["path"] as? String ?: return ToolResult.Error("Missing required parameter: path")
         val oldText = params["old_text"] as? String ?: return ToolResult.Error("Missing required parameter: old_text")
         val newText = params["new_text"] as? String ?: return ToolResult.Error("Missing required parameter: new_text")
-        
+
         return try {
-            val projectBasePath = project.basePath ?: return ToolResult.Error("Project base path not found")
-            val fullPath = if (path == "root") {
-                projectBasePath
-            } else {
-                "$projectBasePath\\$path".replace("/", "\\")
-            }
-            
-            // 打印调试信息
-            println("EditFileTool - Project base path: $projectBasePath")
-            println("EditFileTool - File path: $path")
-            println("EditFileTool - Full path: $fullPath")
-            println("EditFileTool - Full path URL: file://$fullPath")
-            
-            var virtualFile = VirtualFileManager.getInstance().findFileByUrl("file:///$fullPath")
+            val resolvedPath = resolveFilePath(project, path)
+                ?: return ToolResult.Error("Project base path not found")
+
+            println("EditFileTool - Resolved path: $resolvedPath")
+
+            var virtualFile = findVirtualFile(resolvedPath)
             var document = if (virtualFile?.exists() == true) {
                 FileDocumentManager.getInstance().getDocument(virtualFile)
             } else {
                 null
             }
-            
+
             var newContent: String
             var oldLineCount = 0
             var newLineCount = 0
-            
+
             if (document != null) {
                 // 文件存在，检查并替换内容
                 val fileContent = document.text
-                
+
                 if (!fileContent.contains(oldText)) {
                     return ToolResult.Error("Old text not found in file: $path")
                 }
-                
-                // 计算旧文本和新文本的行数
+
                 oldLineCount = oldText.lines().size
                 newLineCount = newText.lines().size
-                
+
                 newContent = fileContent.replace(oldText, newText)
-                
-                // 在WriteCommandAction中执行文件修改
+
                 WriteCommandAction.runWriteCommandAction(project) {
                     document.setText(newContent)
                     FileDocumentManager.getInstance().saveDocument(document)
@@ -82,80 +73,67 @@ class EditFileTool : Tool(
             } else {
                 // 文件不存在，创建新文件
                 println("EditFileTool - File not found, creating new file: $path")
-                
-                // 计算新文本的行数（旧行数为0）
+
                 oldLineCount = 0
                 newLineCount = newText.lines().size
-                
-                // 在WriteCommandAction中执行文件和目录创建
+
+                val parentPath = resolvedPath.parent
+                    ?: return ToolResult.Error("Cannot determine parent directory for: $path")
+                val fileName = resolvedPath.fileName?.toString()
+                    ?: return ToolResult.Error("Cannot determine file name for: $path")
+
                 var createdVirtualFile: VirtualFile? = null
-                var createdDocument = WriteCommandAction.runWriteCommandAction<Any>(project) {
-                    // 确保父目录存在
-                    val parentPath = fullPath.substring(0, fullPath.lastIndexOf('\\'))
-                    var parentVirtualFile = VirtualFileManager.getInstance().findFileByUrl("file:///$parentPath")
-                    
-                    if (parentVirtualFile == null || !parentVirtualFile.exists()) {
-                        // 创建父目录
-                        println("EditFileTool - Parent directory not found, creating: $parentPath")
-                        
-                        // 从项目根目录开始创建目录结构
-                        var currentPath = projectBasePath
-                        var currentVirtualFile = VirtualFileManager.getInstance().findFileByUrl("file:///$currentPath")
-                        
-                        val pathParts = path.split('/').dropLast(1) // 移除文件名，保留目录部分
-                        for (part in pathParts) {
-                            currentPath += "\\$part"
-                            val nextVirtualFile = VirtualFileManager.getInstance().findFileByUrl("file:///$currentPath")
-                            
-                            if (nextVirtualFile == null || !nextVirtualFile.exists()) {
-                                // 创建目录
-                                currentVirtualFile = currentVirtualFile?.createChildDirectory(this, part)
-                                    ?: return@runWriteCommandAction null
-                            } else {
-                                currentVirtualFile = nextVirtualFile
-                            }
-                        }
-                        
-                        // 创建新文件
-                        val fileName = path.substring(path.lastIndexOf('/') + 1)
-                        createdVirtualFile = currentVirtualFile?.createChildData(this, fileName)
-                            ?: return@runWriteCommandAction null
-                    } else {
-                        // 父目录存在，直接创建文件
-                        val fileName = path.substring(path.lastIndexOf('/') + 1)
-                        createdVirtualFile = parentVirtualFile.createChildData(this, fileName)
-                            ?: return@runWriteCommandAction null
-                    }
-                    
-                    // 获取新文件的文档
-                    val doc = FileDocumentManager.getInstance().getDocument(createdVirtualFile)
+                val createdDocument = WriteCommandAction.runWriteCommandAction<Any>(project) {
+                    // 确保父目录链存在：从项目根逐层创建
+                    val basePath = project.basePath ?: return@runWriteCommandAction null
+                    val baseDir = LocalFileSystem.getInstance().findFileByPath(basePath)
                         ?: return@runWriteCommandAction null
-                    
-                    // 直接使用newText作为文件内容（因为文件是新创建的）
+
+                    val normalizedRelPath = normalizePath(path)
+                    val parts = normalizedRelPath.split("/")
+                    val dirParts = parts.dropLast(1)  // 目录部分
+                    val fileNamePart = parts.last()    // 文件名
+
+                    var currentDir: VirtualFile = baseDir
+                    for (dirName in dirParts) {
+                        if (dirName.isEmpty()) continue
+                        val child = currentDir.findChild(dirName)
+                        currentDir = if (child != null && child.isDirectory) {
+                            child
+                        } else {
+                            currentDir.createChildDirectory(this, dirName)
+                        }
+                    }
+
+                    // 在最终目录中创建文件
+                    createdVirtualFile = currentDir.createChildData(this, fileNamePart)
+
+                    val doc = FileDocumentManager.getInstance().getDocument(createdVirtualFile!!)
+                        ?: return@runWriteCommandAction null
+
                     doc.setText(newText)
                     FileDocumentManager.getInstance().saveDocument(doc)
-                    
                     doc
                 } as? com.intellij.openapi.editor.Document
-                
+
                 if (createdDocument == null) {
                     return ToolResult.Error("Could not create or initialize file: $path")
                 }
-                
+
                 virtualFile = createdVirtualFile
                 document = createdDocument
                 newContent = newText
             }
-            
+
             println("EditFileTool - Virtual file: ${virtualFile?.path}")
-            
+
             val lineChange = newLineCount - oldLineCount
             val lineChangeText = when {
                 lineChange > 0 -> "+$lineChange "
-                lineChange < 0 -> "-$lineChange "
+                lineChange < 0 -> "$lineChange "
                 else -> "0 "
             }
-            
+
             ToolResult.Success(
                 mapOf(
                     "path" to path,

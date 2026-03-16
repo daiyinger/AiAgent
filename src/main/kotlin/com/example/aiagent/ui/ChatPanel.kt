@@ -525,7 +525,6 @@ fun ChatPanel() {
                                                 }
                                             },
                                             onToolCall = { toolCall ->
-                                                if (!isSending) return@sendMessage
                                                 log("收到LangChain4j工具调用: ${toolCall.toolName}, ID: ${toolCall.id}")
                                                 CoroutineScope(Dispatchers.Main).launch {
                                                     val newMessages = messages.value.toMutableList()
@@ -598,7 +597,6 @@ fun ChatPanel() {
                                                 }
                                             },
                                             onToolOutput = { toolName, output ->
-                                                if (!isSending) return@sendMessage
                                                 log("收到工具输出: $toolName - ${output.take(50)}...")
                                                 CoroutineScope(Dispatchers.Main).launch {
                                                     val newMessages = messages.value.toMutableList()
@@ -900,7 +898,11 @@ private fun ModelSelector(settingsVersion: Int = 0) {
             if (expanded && allModelsWithProvider.isNotEmpty()) {
                 val currentIndex = allModelsWithProvider.indexOfFirst { it.model == currentModel }
                 if (currentIndex >= 0) {
-                    listState.scrollToItem(currentIndex)
+                    try {
+                        listState.scrollToItem(currentIndex)
+                    } catch (e: Exception) {
+                        // 忽略滚动错误
+                    }
                 }
             }
         }
@@ -1518,9 +1520,13 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                             }
                         }
                         
-                        LaunchedEffect(message.output) {
+                        LaunchedEffect(message.output, outputScrollState) {
                             if (outputLineList.isNotEmpty()) {
-                                outputScrollState.scrollToItem(0)
+                                try {
+                                    outputScrollState.scrollToItem(0)
+                                } catch (e: Exception) {
+                                    // 忽略滚动错误（组件可能已卸载）
+                                }
                             }
                         }
                     }

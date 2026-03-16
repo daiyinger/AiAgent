@@ -33,10 +33,9 @@ dependencies {
     // JSON 处理库
     implementation("org.json:json:20240303")
     
-    // LangChain4j - AI Agent框架
-    implementation("dev.langchain4j:langchain4j:0.36.2")
-    implementation("dev.langchain4j:langchain4j-open-ai:0.36.2")
-    implementation("dev.langchain4j:langchain4j-ollama:0.36.2")
+    // HTTP 客户端（使用 Java 原生 HttpURLConnection，无需额外依赖）
+    // JSON 处理
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.19.2")
 }
 
 intellijPlatform {

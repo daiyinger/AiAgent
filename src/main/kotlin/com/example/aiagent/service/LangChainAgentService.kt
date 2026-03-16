@@ -1,46 +1,43 @@
 package com.example.aiagent.service
 
+import com.example.aiagent.api.*
 import com.example.aiagent.settings.AiAgentSettings
-import com.example.aiagent.tools.*
+import com.example.aiagent.tools.ToolManager
+import com.example.aiagent.tools.ToolResult
 import com.example.aiagent.ui.ToolCallMessage
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
-import dev.langchain4j.agent.tool.Tool
-import dev.langchain4j.data.message.AiMessage
-import dev.langchain4j.data.message.ChatMessage
-import dev.langchain4j.model.chat.ChatLanguageModel
-import dev.langchain4j.model.openai.OpenAiChatModel
-import dev.langchain4j.model.ollama.OllamaChatModel
-import dev.langchain4j.model.output.Response
-import dev.langchain4j.service.AiServices
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 使用LangChain4j实现的AI Agent服务
- * 提供更稳定的工具调用和流式响应处理
+ * AI Agent 服务
+ * 支持流式响应、Token 优化、智能历史管理
  */
 class LangChainAgentService(private val project: Project) {
 
-    private fun log(message: String) {
-        LogService.log(message)
+    companion object {
+        /** 工具调用最大轮数 */
+        private const val MAX_TOOL_ROUNDS = 10
+        /** 截断续传最大次数（finish_reason=length 时自动继续） */
+        private const val MAX_CONTINUATION_ROUNDS = 3
+        /** 最大历史消息数（保留最近 N 条） */
+        private const val MAX_HISTORY_MESSAGES = 20
+        /** 单条消息最大字符数 */
+        private const val MAX_MESSAGE_LENGTH = 4000
+        /** 工具结果截断长度 */
+        private const val MAX_TOOL_RESULT_LENGTH = 6000
     }
 
-    // 当前正在进行的请求任务
-    private var currentJob: Job? = null
+    private fun log(message: String) = LogService.log(message)
 
-    // 取消标志
+    private var currentJob: Job? = null
     private val isCancelled = AtomicBoolean(false)
 
-    /**
-     * 停止当前正在进行的会话/请求
-     */
     fun stopCurrentSession() {
         log("停止当前会话")
         isCancelled.set(true)
@@ -48,368 +45,12 @@ class LangChainAgentService(private val project: Project) {
         currentJob = null
     }
 
-    /**
-     * 重置取消标志，用于新会话
-     */
-    fun resetCancellation() {
-        isCancelled.set(false)
-    }
+    fun resetCancellation() { isCancelled.set(false) }
+    fun isCancelled(): Boolean = isCancelled.get()
 
     /**
-     * 检查是否已取消
-     */
-    fun isCancelled(): Boolean = isCancelled.get()
-    
-    /**
-     * LangChain4j Agent接口
-     * 定义agent可以调用的工具
-     */
-    interface Agent {
-        fun chat(message: String): String
-    }
-    
-    /**
-     * 包装的 ChatLanguageModel，用于捕获 token 使用情况
-     */
-    inner class TokenCapturingChatLanguageModel(
-        private val delegate: ChatLanguageModel
-    ) : ChatLanguageModel {
-        var tokenUsage: TokenUsage? = null
-        
-        override fun generate(messages: List<ChatMessage>): Response<AiMessage> {
-            val response = delegate.generate(messages)
-            // 从响应中提取token使用情况
-            extractTokenUsage(response)
-            return response
-        }
-        
-        override fun generate(messages: List<ChatMessage>, toolSpecifications: List<dev.langchain4j.agent.tool.ToolSpecification>): Response<AiMessage> {
-            val response = delegate.generate(messages, toolSpecifications)
-            // 从响应中提取token使用情况
-            extractTokenUsage(response)
-            return response
-        }
-        
-        override fun generate(messages: List<ChatMessage>, toolSpecification: dev.langchain4j.agent.tool.ToolSpecification): Response<AiMessage> {
-            val response = delegate.generate(messages, toolSpecification)
-            // 从响应中提取token使用情况
-            extractTokenUsage(response)
-            return response
-        }
-        
-        /**
-         * 从Response中提取token使用情况
-         */
-        private fun extractTokenUsage(response: Response<AiMessage>) {
-            try {
-                // 检查响应是否包含tokenUsage
-                val tokenUsageInfo = response.tokenUsage()
-                if (tokenUsageInfo != null) {
-                    val promptTokens = tokenUsageInfo.inputTokenCount()
-                    val completionTokens = tokenUsageInfo.outputTokenCount()
-                    val totalTokens = tokenUsageInfo.totalTokenCount()
-                    
-                    if (promptTokens != null && completionTokens != null) {
-                        tokenUsage = TokenUsage(promptTokens, completionTokens, totalTokens ?: (promptTokens + completionTokens))
-                        this@LangChainAgentService.log("提取到Token使用情况: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens")
-                    }
-                }
-            } catch (e: Exception) {
-                this@LangChainAgentService.log("提取Token使用情况时出错: ${e.message}")
-                e.printStackTrace()
-            }
-        }
-    }
-    
-    data class TokenUsage(
-        val promptTokens: Int,
-        val completionTokens: Int,
-        val totalTokens: Int
-    )
-    
-    /**
-     * 工具类包装器，将现有工具转换为LangChain4j工具
-     */
-    class ToolWrapper(
-        private val project: Project, 
-        private val onToolCall: (String, String, String) -> Unit,
-        private val onToolOutput: ((String, String) -> Unit)? = null
-    ) {
-        
-        @Tool("List files and directories in a given path. Supports filtering by file extension.")
-        fun listFiles(
-            path: String = "",
-            recursive: Boolean = false,
-            extension: String? = null
-        ): String {
-            val params = mutableMapOf<String, Any>()
-            if (path.isNotEmpty()) params["path"] = path
-            params["recursive"] = recursive
-            if (extension != null) params["extension"] = extension
-            
-            onToolCall("listFiles", params.toString(), "执行中...")
-            
-            val result = runBlocking {
-                ListFilesTool().execute(project, params)
-            }
-            
-            val response = when (result) {
-                is ToolResult.Success -> {
-                    onToolCall("listFiles", params.toString(), "成功")
-                    "Success: ${result.data}"
-                }
-                is ToolResult.Error -> {
-                    onToolCall("listFiles", params.toString(), "失败: ${result.message}")
-                    "Failed: ${result.message}"
-                }
-                is ToolResult.Progress -> {
-                    onToolCall("listFiles", params.toString(), "进行中: ${result.message}")
-                    "Progress: ${result.message}"
-                }
-                is ToolResult.OutputUpdate -> {
-                    "Output: ${result.output}"
-                }
-            }
-            return response
-        }
-        
-        @Tool("Read the content of a file at the given path")
-        fun readFile(path: String): String {
-            val params = mapOf("path" to path)
-            
-            onToolCall("readFile", params.toString(), "执行中...")
-            
-            val result = runBlocking {
-                ReadFileTool().execute(project, params)
-            }
-            
-            val response = when (result) {
-                is ToolResult.Success -> {
-                    onToolCall("readFile", params.toString(), "成功")
-                    "Success: ${result.data}"
-                }
-                is ToolResult.Error -> {
-                    onToolCall("readFile", params.toString(), "失败: ${result.message}")
-                    "Failed: ${result.message}"
-                }
-                is ToolResult.Progress -> {
-                    onToolCall("readFile", params.toString(), "进行中: ${result.message}")
-                    "Progress: ${result.message}"
-                }
-                is ToolResult.OutputUpdate -> {
-                    "Output: ${result.output}"
-                }
-            }
-            return response
-        }
-        
-        @Tool("Edit a file by replacing old content with new content")
-        fun editFile(path: String, old_text: String, new_text: String): String {
-            val params = mapOf(
-                "path" to path,
-                "old_text" to old_text,
-                "new_text" to new_text
-            )
-            
-            onToolCall("editFile", params.toString(), "执行中...")
-            
-            val result = runBlocking {
-                EditFileTool().execute(project, params)
-            }
-            
-            val response = when (result) {
-                is ToolResult.Success -> {
-                    onToolCall("editFile", params.toString(), "成功")
-                    "Success: ${result.data}"
-                }
-                is ToolResult.Error -> {
-                    onToolCall("editFile", params.toString(), "失败: ${result.message}")
-                    "Failed: ${result.message}"
-                }
-                is ToolResult.Progress -> {
-                    onToolCall("editFile", params.toString(), "进行中: ${result.message}")
-                    "Progress: ${result.message}"
-                }
-                is ToolResult.OutputUpdate -> {
-                    "Output: ${result.output}"
-                }
-            }
-            return response
-        }
-        
-        @Tool("Search for files in the project by name or pattern")
-        fun searchFiles(pattern: String, maxResults: Int = 20): String {
-            val params = mutableMapOf<String, Any>("pattern" to pattern)
-            if (maxResults > 0) params["max_results"] = maxResults
-            
-            onToolCall("searchFiles", params.toString(), "执行中...")
-            
-            val result = runBlocking {
-                SearchFilesTool().execute(project, params)
-            }
-            
-            val response = when (result) {
-                is ToolResult.Success -> {
-                    onToolCall("searchFiles", params.toString(), "成功")
-                    "Success: ${result.data}"
-                }
-                is ToolResult.Error -> {
-                    onToolCall("searchFiles", params.toString(), "失败: ${result.message}")
-                    "Failed: ${result.message}"
-                }
-                is ToolResult.Progress -> {
-                    onToolCall("searchFiles", params.toString(), "进行中: ${result.message}")
-                    "Progress: ${result.message}"
-                }
-                is ToolResult.OutputUpdate -> {
-                    "Output: ${result.output}"
-                }
-            }
-            return response
-        }
-        
-        @Tool("Analyze the current Android project structure and provide insights")
-        fun analyzeProject(): String {
-            val params = emptyMap<String, Any>()
-            
-            onToolCall("analyzeProject", params.toString(), "执行中...")
-            
-            val result = runBlocking {
-                AndroidProjectAnalysisTool().execute(project, params)
-            }
-            
-            val response = when (result) {
-                is ToolResult.Success -> {
-                    onToolCall("analyzeProject", params.toString(), "成功")
-                    "Success: ${result.data}"
-                }
-                is ToolResult.Error -> {
-                    onToolCall("analyzeProject", params.toString(), "失败: ${result.message}")
-                    "Failed: ${result.message}"
-                }
-                is ToolResult.Progress -> {
-                    onToolCall("analyzeProject", params.toString(), "进行中: ${result.message}")
-                    "Progress: ${result.message}"
-                }
-                is ToolResult.OutputUpdate -> {
-                    "Output: ${result.output}"
-                }
-            }
-            return response
-        }
-        
-        @Tool("Compile the Android project")
-        fun compileProject(mode: String = "build"): String {
-            val params = mapOf("mode" to mode)
-            
-            onToolCall("compileProject", params.toString(), "执行中...")
-            
-            val result = runBlocking {
-                CompileProjectTool().execute(project, params) { output ->
-                    onToolOutput?.invoke("compileProject", output)
-                }
-            }
-            
-            val response = when (result) {
-                is ToolResult.Success -> {
-                    onToolCall("compileProject", params.toString(), "成功")
-                    "Success: ${result.data}"
-                }
-                is ToolResult.Error -> {
-                    onToolCall("compileProject", params.toString(), "失败: ${result.message}")
-                    "Failed: ${result.message}"
-                }
-                is ToolResult.Progress -> {
-                    onToolCall("compileProject", params.toString(), "进行中: ${result.message}")
-                    "Progress: ${result.message}"
-                }
-                is ToolResult.OutputUpdate -> {
-                    "Output: ${result.output}"
-                }
-            }
-            return response
-        }
-    }
-    
-    /**
-     * 创建ChatLanguageModel
-     */
-    private fun createChatModel(): TokenCapturingChatLanguageModel {
-        val settings = AiAgentSettings.instance.state
-        val currentProvider = settings.providers.find { it.id == settings.currentProviderId } 
-            ?: settings.providers.firstOrNull() 
-            ?: throw IllegalStateException("No provider configured")
-        
-        log("创建ChatModel: provider=${currentProvider.name}, model=${settings.currentModel}")
-        
-        val originalModel = when (currentProvider.apiType) {
-            "openai" -> {
-                val baseUrl = currentProvider.apiUrl.trimEnd('/')
-                val finalUrl = if (baseUrl.endsWith("/v1")) {
-                    baseUrl
-                } else if (baseUrl.endsWith("/v1/")) {
-                    baseUrl.trimEnd('/')
-                } else {
-                    "$baseUrl/v1"
-                }
-                log("OpenAI baseUrl: $finalUrl")
-                
-                val builder = OpenAiChatModel.builder()
-                    .baseUrl(finalUrl)
-                    .apiKey(currentProvider.apiKey)
-                    .modelName(settings.currentModel)
-                    .timeout(java.time.Duration.ofSeconds(currentProvider.timeoutSeconds.toLong()))
-                
-                if (!settings.currentModel.contains("deepseek")) {
-                    builder.temperature(currentProvider.temperature)
-                    builder.topP(currentProvider.topP)
-                }
-                
-                builder.build()
-            }
-            "ollama" -> {
-                val baseUrl = currentProvider.apiUrl.trimEnd('/')
-                log("Ollama baseUrl: $baseUrl")
-                
-                OllamaChatModel.builder()
-                    .baseUrl(baseUrl)
-                    .modelName(settings.currentModel)
-                    .temperature(currentProvider.temperature)
-                    .topP(currentProvider.topP)
-                    .timeout(java.time.Duration.ofSeconds(currentProvider.timeoutSeconds.toLong()))
-                    .build()
-            }
-            else -> {
-                throw IllegalArgumentException("Unsupported API type: ${currentProvider.apiType}")
-            }
-        }
-        
-        // 使用TokenCapturingChatLanguageModel包装原始模型
-        return TokenCapturingChatLanguageModel(originalModel)
-    }
-    
-    /**
-     * 构建Agent
-     */
-    private fun buildAgent(
-        onToolCall: (String, String, String) -> Unit,
-        onToolOutput: ((String, String) -> Unit)? = null
-    ): Pair<Agent, TokenCapturingChatLanguageModel> {
-        log("构建LangChain4j Agent")
-        
-        val chatModel = createChatModel()
-        val toolWrapper = ToolWrapper(project, onToolCall, onToolOutput)
-        
-        val agent = AiServices.builder(Agent::class.java)
-            .chatLanguageModel(chatModel)
-            .tools(toolWrapper)
-            .build()
-        
-        return Pair(agent, chatModel)
-    }
-    
-    /**
-     * 发送消息并获取响应
+     * 发送消息并获取流式响应
+     * 支持多轮工具调用：模型可连续调用多个工具，直到给出最终回答
      */
     suspend fun sendMessage(
         message: String,
@@ -420,280 +61,671 @@ class LangChainAgentService(private val project: Project) {
         onToolOutput: ((String, String) -> Unit)? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            // 检查是否已取消
             if (isCancelled.get()) {
-                log("请求已取消，不发送消息")
                 return@withContext Result.failure(Exception("Request cancelled"))
             }
 
             log("发送消息: ${message.take(100)}...")
 
             // 检查缓存
-            val cachedResponse = checkCache(message)
-            if (cachedResponse != null) {
-                log("使用缓存的响应")
-                // 估算token数
-                val estimatedInputTokens = estimateTokenCount(message)
-                val estimatedOutputTokens = estimateTokenCount(cachedResponse)
-
-                // 通知token使用情况
-                ApplicationManager.getApplication().invokeLater {
-                    onTokenUsage(estimatedInputTokens, estimatedOutputTokens)
-                }
-
-                // 流式发送缓存的响应
-                ApplicationManager.getApplication().invokeLater {
-                    cachedResponse.forEach { char ->
-                        if (isCancelled.get()) {
-                            log("缓存响应发送已取消")
-                            return@invokeLater
-                        }
-                        Thread.sleep(5)
-                        onChunk(char.toString())
-                    }
-                    // 缓存响应发送完成后调用onComplete
-                    onComplete()
-                }
+            checkCache(message)?.let { cached ->
+                deliverCachedResponse(cached, onChunk, onComplete, onTokenUsage, message)
                 return@withContext Result.success(Unit)
             }
 
-            // 构建系统提示
-            val systemPrompt = buildSystemPrompt()
+            val settings = AiAgentSettings.instance.state
+            val client = OpenAiClient.fromSettings(settings)
+            val supportsFc = client.supportsFunctionCalling()
 
-            // 工具调用ID映射，用于跟踪正在执行的工具调用
-            val toolCallIds = mutableMapOf<String, String>()
+            // 构建优化后的消息列表
+            val currentMessages = buildOptimizedMessageList(message, embedToolsInPrompt = !supportsFc)
+            val tools = if (supportsFc) ToolDefinitions.getAllTools() else emptyList()
 
-            // 创建工具调用回调
-            val toolCallCallback: (String, String, String) -> Unit = { toolName, paramsStr, status ->
-                log("工具调用: $toolName, 参数: $paramsStr, 状态: $status")
-                ApplicationManager.getApplication().invokeLater {
-                    // 解析参数字符串，构建参数映射
-                    val parameters = mutableMapOf<String, Any>()
-                    try {
-                        // 移除首尾的大括号
-                        val cleanedParamsStr = paramsStr.trim().removePrefix("{")
-                            .removeSuffix("}")
-                        if (cleanedParamsStr.isNotEmpty()) {
-                            // 分割参数对
-                            val paramPairs = cleanedParamsStr.split(",")
-                            for (pair in paramPairs) {
-                                val parts = pair.split("=", limit = 2)
-                                if (parts.size == 2) {
-                                    val key = parts[0].trim()
-                                    val value = parts[1].trim()
-                                    parameters[key] = value
+            log("模型=${settings.currentModel}, FC=$supportsFc, 消息数=${currentMessages.size}")
+
+            val isDslMode = !supportsFc
+            var finalResponse = StringBuilder()
+            var totalInputTokens = 0
+            var totalOutputTokens = 0
+
+            // 多轮工具调用循环
+            var round = 0
+            while (round < MAX_TOOL_ROUNDS && !isCancelled.get()) {
+                round++
+                log("=== 工具调用第 $round 轮 ===")
+
+                val roundResponse = StringBuilder()
+                val toolCallBuffer = mutableListOf<ToolCall>()
+                val reasoningContentBuffer = StringBuilder()  // DeepSeek 思维内容
+                var lastFinishReason: String? = null
+
+                // 流式请求
+                client.chatStream(currentMessages, tools).collect { chunk ->
+                    if (isCancelled.get()) return@collect
+
+                    when (chunk) {
+                        is StreamChunk.Content -> {
+                            if (chunk.toolCalls.isNotEmpty()) {
+                                toolCallBuffer.addAll(chunk.toolCalls)
+                            }
+                            // 累积 reasoning_content（DeepSeek 思维模式）
+                            if (!chunk.reasoningContent.isNullOrEmpty()) {
+                                reasoningContentBuffer.append(chunk.reasoningContent)
+                            }
+                            // 记录 finish_reason（流式中通常在最后一个 chunk 出现）
+                            if (chunk.finishReason != null) {
+                                lastFinishReason = chunk.finishReason
+                            }
+                            if (chunk.content.isNotEmpty()) {
+                                roundResponse.append(chunk.content)
+                                // FC 模式下实时发送文本内容，DSL 模式等解析后再发送
+                                if (!isDslMode) {
+                                    ApplicationManager.getApplication().invokeLater {
+                                        onChunk(chunk.content)
+                                    }
                                 }
                             }
                         }
-                    } catch (e: Exception) {
-                        // 如果解析失败，使用原始参数字符串
-                        parameters["params"] = paramsStr
-                    }
-
-                    // 生成或获取工具调用ID
-                    val toolCallKey = "$toolName-${paramsStr.take(50)}" // 使用工具名和参数的前50个字符作为键
-                    val toolCallId = toolCallIds.getOrPut(toolCallKey) { System.currentTimeMillis().toString() }
-
-                    // 查找是否已经存在该工具调用消息，以保留之前的输出
-                    var existingOutput = ""
-                    // 这里暂时无法直接访问 UI 中的消息列表，所以我们依赖 chatStateService 来保存输出
-
-                    val toolCallMessage = ToolCallMessage(
-                        id = toolCallId,
-                        toolName = toolName,
-                        parameters = parameters,
-                        timestamp = LocalDateTime.now(),
-                        isExecuting = status == "执行中..." || status.startsWith("进行中:"),
-                        result = if (status == "成功") "成功" else if (status.startsWith("失败:")) status.substring(3) else null,
-                        output = existingOutput
-                    )
-                    onToolCall(toolCallMessage)
-
-                    // 如果工具调用完成或失败，从映射中移除，这样下次相同工具调用会创建新的框
-                    if (status == "成功" || status.startsWith("失败:")) {
-                        toolCallIds.remove(toolCallKey)
+                        is StreamChunk.Done -> { /* 流结束 */ }
                     }
                 }
-            }
 
-            // 构建Agent并获取TokenCapturingChatLanguageModel
-            val (agent, tokenCapturingModel) = buildAgent(toolCallCallback, onToolOutput)
+                log("第 $round 轮 finish_reason=$lastFinishReason")
 
-            // 获取对话历史
-            val chatStateService = ChatStateService.instance
-            val history = chatStateService.currentSession?.messages ?: emptyList()
+                // 合并流式 tool call delta
+                var resolvedToolCalls = mergeToolCalls(toolCallBuffer)
+                log("FC 合并后 tool calls: ${resolvedToolCalls.size}")
 
-            log("获取到 ${history.size} 条历史消息")
-            history.forEachIndexed { index, msg ->
-                log("历史消息 $index: type=${msg.type}, content=${msg.content.take(50)}...")
-            }
+                // 如果 FC 没有返回 tool calls，尝试从文本解析 DSL 格式
+                if (resolvedToolCalls.isEmpty() && !isCancelled.get()) {
+                    val responseText = roundResponse.toString()
+                    val dslToolCalls = parseDslToolCalls(responseText)
+                    if (dslToolCalls.isNotEmpty()) {
+                        log("从文本解析到 ${dslToolCalls.size} 个 DSL 工具调用")
+                        resolvedToolCalls = dslToolCalls
+                        val cleanText = removeDslFromText(responseText)
+                        roundResponse.clear()
+                        roundResponse.append(cleanText)
+                    }
+                }
 
-            // 构建对话历史文本
-            val historyText = buildString {
-                history.forEach { msg ->
-                    when (msg.type) {
-                        "user" -> appendLine("用户: ${msg.content}")
-                        "ai" -> appendLine("AI: ${msg.content}")
-                        "tool" -> {
-                            val resultSummary = when {
-                                msg.result == "成功" || msg.result?.startsWith("Success") == true -> "成功"
-                                msg.result == "失败" || msg.result?.startsWith("Error") == true -> "失败"
-                                else -> "执行完成"
-                            }
-                            appendLine("工具: ${msg.toolName} ($resultSummary)")
+                // DSL 模式下发送清理后的文本内容
+                if (isDslMode && !isCancelled.get()) {
+                    val cleanContent = roundResponse.toString()
+                    if (cleanContent.isNotEmpty()) {
+                        ApplicationManager.getApplication().invokeLater {
+                            onChunk(cleanContent)
                         }
                     }
                 }
-            }
 
-            log("构建的对话历史: ${historyText.take(200)}...")
+                // ====== 处理 finish_reason = "length"（输出被截断） ======
+                // 模型因 max_tokens 限制被截断，回复不完整
+                // 将已输出的内容作为 assistant 消息加入历史，追加一轮让模型继续
+                if (lastFinishReason == "length" && resolvedToolCalls.isEmpty()) {
+                    val partialText = roundResponse.toString()
+                    log("输出被截断 (finish_reason=length)，已输出 ${partialText.length} 字符，尝试续传")
 
-            // 构建完整消息
-            val fullMessage = if (historyText.isNotEmpty()) {
-                "$systemPrompt\n\n对话历史:\n$historyText\n\n用户: $message"
-            } else {
-                "$systemPrompt\n\n用户: $message"
-            }
+                    // 将截断的内容作为 assistant 消息
+                    val reasoningContent = reasoningContentBuffer.toString().ifEmpty { null }
+                    currentMessages.add(ChatMessage.Assistant(
+                        content = partialText,
+                        reasoningContent = reasoningContent
+                    ))
+                    // 追加一条 user 消息请求继续
+                    currentMessages.add(ChatMessage.User("请继续，从你上次停下的地方接着说。"))
 
-            // 估算输入token数
-            val estimatedInputTokens = estimateTokenCount(fullMessage)
-            log("估算输入token数: $estimatedInputTokens")
+                    // 续传计数器：最多续传 MAX_CONTINUATION_ROUNDS 次
+                    var continuations = 0
+                    while (continuations < MAX_CONTINUATION_ROUNDS && !isCancelled.get()) {
+                        continuations++
+                        log("续传第 $continuations 次")
 
-            // 发送消息并获取响应
-            val response = agent.chat(fullMessage)
+                        val contResponse = StringBuilder()
+                        var contFinishReason: String? = null
 
-            // 添加到缓存
-            addToCache(message, response)
+                        client.chatStream(currentMessages, tools).collect { chunk ->
+                            if (isCancelled.get()) return@collect
+                            when (chunk) {
+                                is StreamChunk.Content -> {
+                                    if (chunk.finishReason != null) contFinishReason = chunk.finishReason
+                                    if (chunk.content.isNotEmpty()) {
+                                        contResponse.append(chunk.content)
+                                        ApplicationManager.getApplication().invokeLater {
+                                            onChunk(chunk.content)
+                                        }
+                                    }
+                                }
+                                is StreamChunk.Done -> {}
+                            }
+                        }
 
-            // 获取实际的token使用情况
-            val tokenUsage = tokenCapturingModel.tokenUsage
-            val actualInputTokens = tokenUsage?.promptTokens ?: estimatedInputTokens
-            val actualOutputTokens = tokenUsage?.completionTokens ?: estimateTokenCount(response)
+                        roundResponse.append(contResponse)
 
-            log("实际Token使用情况: 输入=$actualInputTokens, 输出=$actualOutputTokens")
+                        // 如果不再是 length 截断，续传完成
+                        if (contFinishReason != "length") {
+                            log("续传完成，finish_reason=$contFinishReason")
+                            break
+                        }
 
-            // 通知token使用情况
-            ApplicationManager.getApplication().invokeLater {
-                onTokenUsage(actualInputTokens, actualOutputTokens)
-            }
-
-            log("收到响应: ${response.take(100)}...")
-
-            // 发送响应（模拟流式）
-            ApplicationManager.getApplication().invokeLater {
-                // 模拟流式发送，每次发送一个字符
-                response.forEach { char ->
-                    // 检查是否已取消
-                    if (isCancelled.get()) {
-                        log("响应发送已取消")
-                        return@invokeLater
+                        // 继续被截断，追加到历史再请求
+                        currentMessages.add(ChatMessage.Assistant(content = contResponse.toString()))
+                        currentMessages.add(ChatMessage.User("请继续。"))
                     }
-                    Thread.sleep(5) // 模拟网络延迟，使用更短的延迟
-                    onChunk(char.toString())
+
+                    // 续传完毕，视为最终回答
+                    finalResponse = roundResponse
+                    break
                 }
-                // 响应发送完成后调用onComplete
+
+                // 没有工具调用 → 模型给出了最终回答，退出循环
+                if (resolvedToolCalls.isEmpty()) {
+                    finalResponse = roundResponse
+                    log("第 $round 轮无工具调用，结束循环")
+                    break
+                }
+
+                log("第 $round 轮收到 ${resolvedToolCalls.size} 个工具调用")
+
+                // 添加 AI 响应（含 tool calls 和 reasoning_content）到消息历史
+                val reasoningContent = reasoningContentBuffer.toString().ifEmpty { null }
+                currentMessages.add(ChatMessage.Assistant(
+                    content = roundResponse.toString(),
+                    toolCalls = resolvedToolCalls,
+                    reasoningContent = reasoningContent
+                ))
+
+                // 执行所有工具调用
+                for (toolCall in resolvedToolCalls) {
+                    if (isCancelled.get()) break
+
+                    val resultContent = executeToolCall(toolCall, onToolCall, onToolOutput)
+
+                    val truncatedResult = if (resultContent.length > MAX_TOOL_RESULT_LENGTH) {
+                        resultContent.take(MAX_TOOL_RESULT_LENGTH) + "\n... [已截断，原长度 ${resultContent.length}]"
+                    } else resultContent
+
+                    currentMessages.add(ChatMessage.Tool(
+                        toolCallId = toolCall.id,
+                        name = toolCall.function.name,
+                        content = truncatedResult
+                    ))
+                }
+
+                // 继续下一轮：模型根据工具结果决定是否继续调用工具或给出最终回答
+                finalResponse = StringBuilder()
+            }
+
+            if (round >= MAX_TOOL_ROUNDS) {
+                log("已达到最大工具调用轮数: $MAX_TOOL_ROUNDS")
+            }
+
+            if (isCancelled.get()) {
+                return@withContext Result.failure(Exception("Request cancelled"))
+            }
+
+            val responseText = finalResponse.toString()
+            addToCache(message, responseText)
+
+            // 估算 token
+            val inputTokens = estimateTokenCount(buildString {
+                currentMessages.forEach { append(it.content) }
+            })
+            val outputTokens = estimateTokenCount(responseText)
+
+            ApplicationManager.getApplication().invokeLater {
+                onTokenUsage(inputTokens, outputTokens)
                 onComplete()
             }
 
             Result.success(Unit)
-        } catch (e: Exception) {
-            log("发送消息错误: ${e.message}")
+        } catch (e: Throwable) {
+            log("发送消息错误: ${e.javaClass.simpleName}: ${e.message}")
             e.printStackTrace()
             Result.failure(e)
         }
     }
-    
+
     /**
-     * 估算token数（基于简单的字符计数方法）
+     * 从文本解析 DSL 格式工具调用
+     * 支持多种格式:
+     * 1. <｜DSML｜function_calls> 标准 DeepSeek 格式
+     * 2. 容错：全角/半角竖线混用
+     * 3. <tool_call> 格式（部分模型可能生成）
      */
-    private fun estimateTokenCount(text: String): Int {
-        // 简单估算：1个token约等于4个字符
-        // 实际情况会更复杂，但这是一个合理的近似
-        return (text.length / 4) + 1
+    private fun parseDslToolCalls(text: String): List<ToolCall> {
+        val toolCalls = mutableListOf<ToolCall>()
+
+        log("解析 DSL，输入文本长度: ${text.length}")
+        log("输入文本前300字符: ${text.take(300)}")
+
+        // 尝试匹配 DSML 格式（兼容全角/半角竖线和可能的空格）
+        val functionCallsRegex = """<[｜|]\s*DSML\s*[｜|]\s*function_calls\s*>([\s\S]*?)</[｜|]\s*DSML\s*[｜|]\s*function_calls\s*>""".toRegex()
+        val callsBlockMatch = functionCallsRegex.find(text)
+
+        if (callsBlockMatch != null) {
+            val callsBlock = callsBlockMatch.groupValues[1]
+            log("找到 DSML function_calls 块，内容长度: ${callsBlock.length}")
+
+            // 尝试 invoke 标签格式
+            val invokeRegex = """<[｜|]\s*DSML\s*[｜|]\s*invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)</[｜|]\s*DSML\s*[｜|]\s*invoke\s*>""".toRegex()
+            val functionCallRegex = """<[｜|]\s*DSML\s*[｜|]\s*function_call\s*>([\s\S]*?)</[｜|]\s*DSML\s*[｜|]\s*function_call\s*>""".toRegex()
+
+            val invokeMatches = invokeRegex.findAll(callsBlock).toList()
+            log("找到 ${invokeMatches.size} 个 invoke 标签")
+
+            if (invokeMatches.isNotEmpty()) {
+                invokeMatches.forEachIndexed { index, invokeMatch ->
+                    val invokeName = invokeMatch.groupValues[1]
+                    val invokeContent = invokeMatch.groupValues[2]
+
+                    val funcMatch = functionCallRegex.find(invokeContent)
+                    val callContent = funcMatch?.groupValues?.get(1)?.trim() ?: invokeContent.trim()
+
+                    val argsMap = extractDslArguments(callContent)
+                    log("解析 DSL (invoke): name=$invokeName, args=$argsMap")
+
+                    toolCalls.add(ToolCall(
+                        id = "dsl_${System.currentTimeMillis()}_$index",
+                        type = "function",
+                        function = FunctionCall(
+                            name = invokeName,
+                            arguments = OpenAiClient.objectMapper.writeValueAsString(argsMap)
+                        )
+                    ))
+                }
+            } else {
+                // 回退到直接解析 function_call
+                functionCallRegex.findAll(callsBlock).forEachIndexed { index, match ->
+                    val callContent = match.groupValues[1].trim()
+
+                    val nameMatch = """<name>([^<]+)</name>""".toRegex().find(callContent)
+                    val name = nameMatch?.groupValues?.get(1)?.trim() ?: return@forEachIndexed
+
+                    val argsMap = extractDslArguments(callContent)
+                    log("解析 DSL (direct): name=$name, args=$argsMap")
+
+                    toolCalls.add(ToolCall(
+                        id = "dsl_${System.currentTimeMillis()}_$index",
+                        type = "function",
+                        function = FunctionCall(
+                            name = name,
+                            arguments = OpenAiClient.objectMapper.writeValueAsString(argsMap)
+                        )
+                    ))
+                }
+            }
+        }
+
+        // 如果 DSML 格式没解析到，尝试 <tool_call> 格式（部分模型可能生成）
+        if (toolCalls.isEmpty()) {
+            val toolCallRegex = """<tool_call>\s*(?:<tool_name>(\w+)</tool_name>|<(\w+)>)\s*([\s\S]*?)(?:</tool_call>|$)""".toRegex()
+            toolCallRegex.findAll(text).forEachIndexed { index, match ->
+                val toolName = match.groupValues[1].ifEmpty { match.groupValues[2] }
+                if (toolName.isNotEmpty()) {
+                    val paramsText = match.groupValues[3]
+                    val argsMap = extractXmlParams(paramsText)
+                    log("解析 tool_call 格式: name=$toolName, args=$argsMap")
+
+                    toolCalls.add(ToolCall(
+                        id = "xml_${System.currentTimeMillis()}_$index",
+                        type = "function",
+                        function = FunctionCall(
+                            name = toolName,
+                            arguments = OpenAiClient.objectMapper.writeValueAsString(argsMap)
+                        )
+                    ))
+                }
+            }
+        }
+
+        // 尝试 JSON 格式 tool call（某些模型直接输出 JSON）
+        if (toolCalls.isEmpty()) {
+            val jsonToolCallRegex = """\{\s*"name"\s*:\s*"(\w+)"\s*,\s*"(?:arguments|parameters)"\s*:\s*(\{[^}]*\})\s*\}""".toRegex()
+            jsonToolCallRegex.findAll(text).forEachIndexed { index, match ->
+                val name = match.groupValues[1]
+                val args = match.groupValues[2]
+                if (name.isNotEmpty()) {
+                    log("解析 JSON 格式 tool call: name=$name, args=$args")
+                    toolCalls.add(ToolCall(
+                        id = "json_${System.currentTimeMillis()}_$index",
+                        type = "function",
+                        function = FunctionCall(name = name, arguments = args)
+                    ))
+                }
+            }
+        }
+
+        log("DSL 解析结果: ${toolCalls.size} 个工具调用")
+        return toolCalls
     }
-    
+
     /**
-     * 构建系统提示
+     * 从 XML 格式文本中提取参数 (<key>value</key> 格式)
      */
-    private fun buildSystemPrompt(): String {
-        return """
-            你是Android Studio工程分析专家，擅长：
-            1. 分析工程：用list_files查看结构，read_file读取关键文件，提供分析报告
-            2. 添加功能：分析需求，search_files查找相关代码，edit_file修改文件
-            3. 修改功能：查找相关代码，分析实现，进行修改
-            
-            处理流程：
-            - 先思考，明确需求和步骤
-            - 使用工具时确保路径正确（相对路径）
-            - 修改文件前先读取内容
-            - 提供清晰的操作说明
-            
-            工具：
-            - listFiles(path, recursive, extension): 列出文件
-            - readFile(path): 读取文件内容
-            - editFile(path, oldContent, newContent): 编辑文件
-            - searchFiles(pattern, maxResults): 搜索文件
-            - analyzeProject(): 分析项目结构
-            - compileProject(mode): 编译项目，mode可选值：build（完整构建）、assemble（仅组装）、clean（清理构建）
-            
-            编译建议：
-            - 优先使用 mode=assemble 进行编译，速度更快且避免测试干扰
-            - 仅在需要运行测试和代码检查时使用 mode=build
-            - 如果遇到构建问题，先使用 mode=clean 清理，然后再使用 mode=assemble
-            
-            重要提示：
-            - 请记住对话历史，保持上下文的连贯性
-            - 当用户询问之前的问题时，请参考对话历史回答
-            
-            请简洁高效地完成任务，减少不必要的描述。
-        """.trimIndent()
+    private fun extractXmlParams(text: String): Map<String, Any> {
+        val params = mutableMapOf<String, Any>()
+        val paramRegex = """<(\w+)>(.*?)</\w+>""".toRegex()
+        paramRegex.findAll(text).forEach { match ->
+            val key = match.groupValues[1]
+            val value = match.groupValues[2].trim()
+            if (key != "tool_name" && key != "parameters" && key != "tool_call") {
+                params[key] = value
+            }
+        }
+        return params
     }
-    
+
     /**
-     * 消息缓存，避免重复处理相同的请求
+     * 从 DSL 内容中提取参数
      */
-    private val messageCache = mutableMapOf<String, String>()
-    
-    /**
-     * 检查消息是否在缓存中
-     */
-    private fun checkCache(message: String): String? {
-        return messageCache[message]
+    private fun extractDslArguments(callContent: String): Map<String, Any> {
+        val argsMap = mutableMapOf<String, Any>()
+
+        // 匹配 <arguments>...</arguments> 块
+        val argsBlockMatch = """<arguments>([\s\S]*?)</arguments>""".toRegex().find(callContent)
+        val argsContent = argsBlockMatch?.groupValues?.get(1) ?: ""
+
+        // 匹配每个 <argument name="xxx" type="yyy">value</argument>
+        // 或者 <argument name="xxx">value</argument>
+        val argRegex = """<argument\s+name="([^"]+)"(?:\s+type="[^"]+")?>([^<]*)</argument>""".toRegex()
+        argRegex.findAll(argsContent).forEach { argMatch ->
+            val argName = argMatch.groupValues[1]
+            val argValue = argMatch.groupValues[2].trim()
+            argsMap[argName] = argValue
+        }
+
+        return argsMap
     }
-    
+
     /**
-     * 将消息和响应添加到缓存
+     * 从文本中移除 DSL 标记，保留纯文本
      */
-    private fun addToCache(message: String, response: String) {
-        // 只缓存短消息，避免内存占用过大
-        if (message.length < 200) {
-            messageCache[message] = response
+    private fun removeDslFromText(text: String): String {
+        // 移除 DSML 格式（兼容全角/半角竖线）
+        var result = text.replace("""<[｜|]\s*DSML\s*[｜|]\s*function_calls\s*>[\s\S]*?</[｜|]\s*DSML\s*[｜|]\s*function_calls\s*>""".toRegex(), "")
+        // 移除 tool_call 格式
+        result = result.replace("""<tool_call>[\s\S]*?</tool_call>""".toRegex(), "")
+        return result.trim()
+    }
+
+    /**
+     * 合并流式 tool call delta
+     * 流式模式下，一个 tool call 会分多个 chunk 到达：
+     * - 第一个 chunk: 包含 id、type、name，arguments 可能为空
+     * - 后续 chunk: 只有 index 和部分 arguments，id/name 为空字符串
+     * 必须按 index 分组合并，而非按 id（后续 chunk 的 id 为空）
+     */
+    private fun mergeToolCalls(buffer: List<ToolCall>): List<ToolCall> {
+        if (buffer.isEmpty()) return emptyList()
+
+        return buffer.groupBy { it.index ?: 0 }.map { (_, calls) ->
+            // 从所有 delta 中找到第一个有效的 id 和 name
+            val firstWithId = calls.firstOrNull { it.id.isNotEmpty() }
+            val firstWithName = calls.firstOrNull { it.function.name.isNotEmpty() }
+
+            ToolCall(
+                id = firstWithId?.id ?: "merged_${System.currentTimeMillis()}",
+                type = calls.first().type,
+                function = FunctionCall(
+                    name = firstWithName?.function?.name ?: "",
+                    arguments = calls.joinToString("") { it.function.arguments }
+                ),
+                index = calls.first().index
+            )
+        }.filter { it.function.name.isNotEmpty() }  // 过滤掉没有名称的无效调用
+    }
+
+    /**
+     * 执行单个工具调用
+     */
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun executeToolCall(
+        toolCall: ToolCall,
+        onToolCall: (ToolCallMessage) -> Unit,
+        onToolOutput: ((String, String) -> Unit)?
+    ): String {
+        val toolName = toolCall.function.name
+        val argumentsJson = toolCall.function.arguments
+        val toolCallId = toolCall.id
+
+        log("执行工具: $toolName")
+
+        val params: Map<String, Any> = try {
+            OpenAiClient.objectMapper.readValue(argumentsJson, Map::class.java) as Map<String, Any>
+        } catch (e: Exception) {
+            emptyMap()
+        }
+
+        // 通知 UI 开始
+        notifyToolCallUI(onToolCall, toolCallId, toolName, params, isExecuting = true)
+
+        // 执行工具
+        val toolResult = try {
+            ToolManager.executeTool(project, toolName, params) { outputLine ->
+                ApplicationManager.getApplication().invokeLater {
+                    onToolOutput?.invoke(toolName, outputLine)
+                }
+            }
+        } catch (e: Exception) {
+            ToolResult.Error("工具执行异常: ${e.message}")
+        }
+
+        // 处理结果
+        return when (toolResult) {
+            is ToolResult.Success -> {
+                val result = toolResult.data.toString()
+                notifyToolCallUI(onToolCall, toolCallId, toolName, params,
+                    isExecuting = false, result = "成功", output = result)
+                result
+            }
+            is ToolResult.Error -> {
+                notifyToolCallUI(onToolCall, toolCallId, toolName, params,
+                    isExecuting = false, result = "失败: ${toolResult.message}")
+                "Error: ${toolResult.message}"
+            }
+            is ToolResult.Progress -> {
+                notifyToolCallUI(onToolCall, toolCallId, toolName, params,
+                    isExecuting = true, result = "进行中: ${toolResult.message}")
+                "Progress: ${toolResult.message}"
+            }
+            is ToolResult.OutputUpdate -> {
+                toolResult.output
+            }
+        }
+    }
+
+    private fun notifyToolCallUI(
+        onToolCall: (ToolCallMessage) -> Unit,
+        id: String,
+        toolName: String,
+        params: Map<String, Any>,
+        isExecuting: Boolean,
+        result: String? = null,
+        output: String = ""
+    ) {
+        ApplicationManager.getApplication().invokeLater {
+            onToolCall(ToolCallMessage(
+                id = id,
+                toolName = toolName,
+                parameters = params,
+                timestamp = LocalDateTime.now(),
+                isExecuting = isExecuting,
+                result = result,
+                output = output
+            ))
         }
     }
 
     /**
-     * 清除消息缓存，用于新建会话时
+     * 构建优化的消息列表（Token 优化）
      */
+    private fun buildOptimizedMessageList(
+        currentMessage: String,
+        embedToolsInPrompt: Boolean = false
+    ): MutableList<ChatMessage> {
+        val chatStateService = ChatStateService.instance
+        val history = chatStateService.currentSession?.messages ?: emptyList()
+
+        // 1. 截断历史：只保留最近 N 条有效消息
+        val recentHistory = history
+            .filter { it.type in listOf("user", "ai") && it.content.isNotEmpty() }
+            .takeLast(MAX_HISTORY_MESSAGES)
+
+        log("历史消息: ${history.size} 条 -> 截断后 ${recentHistory.size} 条")
+
+        return buildList {
+            // 系统提示（精简版）
+            add(ChatMessage.System(buildOptimizedSystemPrompt(embedToolsInPrompt)))
+
+            // 历史消息（截断内容）
+            recentHistory.forEach { msg ->
+                val truncatedContent = if (msg.content.length > MAX_MESSAGE_LENGTH) {
+                    msg.content.take(MAX_MESSAGE_LENGTH) + "\n... [已截断]"
+                } else msg.content
+
+                when (msg.type) {
+                    "user" -> add(ChatMessage.User(truncatedContent))
+                    "ai" -> add(ChatMessage.Assistant(truncatedContent))
+                }
+            }
+
+            // 当前消息
+            add(ChatMessage.User(currentMessage))
+        }.toMutableList()
+    }
+
+    /**
+     * 精简的系统提示，减少 Token 消耗
+     * FC 模式：工具定义通过 API tools 参数传递，提示只需概要
+     * 非 FC 模式：需要在提示中嵌入详细的工具说明和调用格式
+     */
+    private fun buildOptimizedSystemPrompt(embedToolsInPrompt: Boolean = false): String {
+        if (!embedToolsInPrompt) {
+            // FC 模式：工具定义已通过 API 传递
+            return """
+                你是 Android Studio 专家，擅长分析和修改项目。
+
+                行为规则：
+                1. 需要信息时直接调用工具，不要先描述你打算做什么
+                2. 拿到工具结果后，如果还需要更多信息，继续调用工具
+                3. 有足够信息后，直接给出完整的最终回答
+                4. 路径用相对路径，修改文件前先读取内容
+                5. 不要说"我来帮你..."或"让我先..."这样的过渡语句，直接行动
+
+                可用工具: list_files, read_file, edit_file, search_files, analyze_project, compile_project
+                编译建议: assemble(快速) > build(完整) > clean(清理后重新)
+            """.trimIndent()
+        }
+
+        // 非 FC 模式：嵌入完整工具定义和调用格式说明
+        val toolsDetailDesc = ToolDefinitions.getToolsDescription()
+        return """
+            你是 Android Studio 专家，擅长分析和修改项目。
+
+            行为规则：
+            1. 需要信息时直接输出工具调用DSL，不要先描述你打算做什么
+            2. 拿到工具结果后，如果还需要更多信息，继续输出工具调用
+            3. 有足够信息后，直接给出完整的最终回答
+            4. 路径用相对路径，修改文件前先读取内容
+            5. 不要说"我来帮你..."或"让我先..."这样的过渡语句，直接行动
+
+            编译建议: assemble(快速) > build(完整) > clean(清理后重新)
+
+            你拥有以下工具：
+            $toolsDetailDesc
+
+            当你需要使用工具时，请严格按照以下 DSL 格式输出（不要输出其他格式）：
+            <｜DSML｜function_calls>
+            <｜DSML｜invoke name="工具名称">
+            <｜DSML｜function_call>
+            <arguments>
+            <argument name="参数名">参数值</argument>
+            </arguments>
+            </｜DSML｜function_call>
+            </｜DSML｜invoke>
+            </｜DSML｜function_calls>
+
+            重要提示：
+            - 每次只输出一个工具调用
+            - 工具名称必须是上面列出的名称之一
+            - 参数值不需要引号
+            - 你可以连续调用多个工具来完成复杂任务
+        """.trimIndent()
+    }
+
+    /**
+     * 交付缓存的响应
+     */
+    private fun deliverCachedResponse(
+        response: String,
+        onChunk: (String) -> Unit,
+        onComplete: () -> Unit,
+        onTokenUsage: (Int, Int) -> Unit,
+        originalMessage: String
+    ) {
+        ApplicationManager.getApplication().invokeLater {
+            onTokenUsage(estimateTokenCount(originalMessage), estimateTokenCount(response))
+
+            // 模拟流式发送
+            response.forEach { char ->
+                onChunk(char.toString())
+                Thread.sleep(1)
+            }
+            onComplete()
+        }
+    }
+
+    /**
+     * 估算 Token 数（优化算法）
+     */
+    private fun estimateTokenCount(text: String): Int {
+        // 中文约 2 token/字，英文约 0.25 token/字符，代码约 1 token/字符
+        var count = 0
+        for (char in text) {
+            count += when {
+                char.code > 127 -> 2  // 中文/Unicode
+                char.isLetterOrDigit() -> 1
+                char.isWhitespace() -> 0
+                else -> 1
+            }
+        }
+        return (count / 2).coerceAtLeast(1)
+    }
+
+    // ========== 缓存 ==========
+
+    private val messageCache = linkedMapOf<String, String>()
+    private val maxCacheSize = 20  // 减少缓存大小
+
+    private fun checkCache(message: String): String? = messageCache[message]
+
+    private fun addToCache(message: String, response: String) {
+        if (message.length > 100 || response.length > 500) return  // 更严格的缓存条件
+        if (messageCache.size >= maxCacheSize) {
+            messageCache.remove(messageCache.keys.first())
+        }
+        messageCache[message] = response
+    }
+
     fun clearCache() {
         log("清除消息缓存")
         messageCache.clear()
     }
-    
+
     /**
      * 测试连接
      */
     suspend fun testConnection(): Boolean = withContext(Dispatchers.IO) {
         try {
             log("测试连接...")
-            
-            val chatModel = createChatModel()
-            val response = chatModel.generate("Hello")
-            
-            log("测试连接成功: ${response.take(50)}...")
+            val settings = AiAgentSettings.instance.state
+            val client = OpenAiClient.fromSettings(settings)
+            val response = client.chat(listOf(ChatMessage.User("Hi")))
+            log("测试连接成功: ${response.content.take(50)}...")
             true
         } catch (e: Exception) {
             log("测试连接失败: ${e.message}")
-            e.printStackTrace()
             false
         }
     }

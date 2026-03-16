@@ -40,11 +40,16 @@ object ToolManager {
         }
     }
 
-    suspend fun executeTool(project: Project, toolName: String, params: Map<String, Any>): ToolResult {
+    suspend fun executeTool(
+        project: Project,
+        toolName: String,
+        params: Map<String, Any>,
+        onOutput: ((String) -> Unit)? = null
+    ): ToolResult {
         val tool = getTool(toolName) ?: return ToolResult.Error("Tool '$toolName' not found")
-        
+
         return try {
-            tool.execute(project, params)
+            tool.execute(project, params, onOutput)
         } catch (e: Exception) {
             ToolResult.Error("Error executing tool '$toolName': ${e.message}")
         }
