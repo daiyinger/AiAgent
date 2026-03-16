@@ -375,7 +375,15 @@ fun ChatPanel() {
                     
                     VerticalScrollbar(
                         modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
-                        adapter = rememberScrollbarAdapter(listState)
+                        adapter = rememberScrollbarAdapter(listState),
+                        style = androidx.compose.foundation.ScrollbarStyle(
+                            minimalHeight = 16.dp,
+                            thickness = 8.dp,
+                            shape = RoundedCornerShape(4.dp),
+                            hoverDurationMillis = 300,
+                            unhoverColor = Color(0xFF3A3A3A),
+                            hoverColor = Color(0xFF4A4A4A)
+                        )
                     )
                 }
             }
