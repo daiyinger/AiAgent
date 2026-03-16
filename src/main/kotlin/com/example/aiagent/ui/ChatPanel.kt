@@ -35,6 +35,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.project.ProjectManager
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.jetbrains.jewel.foundation.theme.JewelTheme
@@ -146,7 +147,14 @@ fun ChatPanel() {
     // 滚动到最新消息
     LaunchedEffect(messages.value.size) {
         if (messages.value.isNotEmpty()) {
-            listState.animateScrollToItem(messages.value.size - 1)
+            // 优先滚动到最新的工具调用消息（如果有）
+            val lastToolCallIndex = messages.value.indexOfLast { it is ToolCallMessage }
+            if (lastToolCallIndex >= 0) {
+                listState.animateScrollToItem(lastToolCallIndex)
+            } else {
+                // 否则滚动到最后一条消息
+                listState.animateScrollToItem(messages.value.size - 1)
+            }
         }
     }
     
@@ -476,6 +484,9 @@ fun ChatPanel() {
                                                         )
                                                         newMessages[aiMessageIndex] = updatedMessage
                                                         messages.value = newMessages
+                                                        
+                                                        // 每次AI消息内容更新后，滚动到最新消息
+                                                        listState.scrollToItem(newMessages.size - 1)
                                                     }
                                                 }
                                             },
@@ -536,6 +547,9 @@ fun ChatPanel() {
                                                         newMessages[aiMessageIndex] = updatedAiMessage
                                                         messages.value = newMessages
                                                         
+                                                        // 滚动到最新的消息
+                                                        listState.scrollToItem(newMessages.size - 1)
+                                                        
                                                         // 更新 ChatStateService 中的 token 统计信息
                                                         val currentSession = chatStateService.currentSession
                                                         if (currentSession != null) {
@@ -572,6 +586,9 @@ fun ChatPanel() {
                                                             updatedToolCall.result,
                                                             updatedToolCall.output
                                                         )
+                                                        
+                                                        // 滚动到更新的工具调用消息的底部
+                                                        listState.scrollToItem(toolCallIndex)
                                                     } else {
                                                         // 如果没有找到，记录日志
                                                         log("未找到工具调用: $toolName")
@@ -619,6 +636,14 @@ fun ChatPanel() {
                                             // 不再创建单独的 TokenUsageMessage，而是在 AI 消息末尾添加 token 统计
                                             
                                             messages.value = newMessages
+                                            
+                                            // 延迟一下让Compose有时间计算新的布局，然后滚动到最新的消息
+                                            CoroutineScope(Dispatchers.Main).launch {
+                                                delay(200)
+                                                if (newMessages.isNotEmpty()) {
+                                                    listState.scrollToItem(newMessages.size - 1)
+                                                }
+                                            }
                                             
                                             result.onFailure { e ->
                                                 log("LangChain4j发送失败: ${e.message}")
@@ -972,7 +997,7 @@ private fun AiMessageItem(message: AiMessage) {
     ) {
         Column(
             modifier = Modifier
-                .widthIn(max = 350.dp)
+                .fillMaxWidth(0.9f)
                 .background(Color(0xFF2D2D2D), RoundedCornerShape(12.dp))
                 .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)
         ) {
