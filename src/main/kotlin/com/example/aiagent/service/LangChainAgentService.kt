@@ -398,18 +398,14 @@ class LangChainAgentService(private val project: Project) {
                 // 估算token数
                 val estimatedInputTokens = estimateTokenCount(message)
                 val estimatedOutputTokens = estimateTokenCount(cachedResponse)
-                
+
                 // 通知token使用情况
-                ApplicationManager.getApplication().invokeLater {
-                    onTokenUsage(estimatedInputTokens, estimatedOutputTokens)
-                }
-                
-                // 流式发送缓存的响应
-                ApplicationManager.getApplication().invokeLater {
-                    cachedResponse.forEach { char ->
-                        Thread.sleep(5)
-                        onChunk(char.toString())
-                    }
+                onTokenUsage(estimatedInputTokens, estimatedOutputTokens)
+
+                // 在当前协程中顺序“流式”发送缓存响应，确保 sendMessage 返回前完成
+                cachedResponse.forEach { char ->
+                    onChunk(char.toString())
+                    Thread.sleep(5)
                 }
                 return@withContext Result.success(Unit)
             }
@@ -530,19 +526,14 @@ class LangChainAgentService(private val project: Project) {
             log("实际Token使用情况: 输入=$actualInputTokens, 输出=$actualOutputTokens")
             
             // 通知token使用情况
-            ApplicationManager.getApplication().invokeLater {
-                onTokenUsage(actualInputTokens, actualOutputTokens)
-            }
+            onTokenUsage(actualInputTokens, actualOutputTokens)
             
             log("收到响应: ${response.take(100)}...")
             
-            // 发送响应（模拟流式）
-            ApplicationManager.getApplication().invokeLater {
-                // 模拟流式发送，每次发送一个字符
-                response.forEach { char ->
-                    Thread.sleep(5) // 模拟网络延迟，使用更短的延迟
-                    onChunk(char.toString())
-                }
+            // 在当前协程中模拟流式发送，确保在返回前完成
+            response.forEach { char ->
+                Thread.sleep(5) // 模拟网络延迟
+                onChunk(char.toString())
             }
             
             Result.success(Unit)
