@@ -1786,6 +1786,13 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                 if (message.toolName == "editFile" || message.toolName == "edit_file") {
                     val oldText = message.parameters["old_text"] as? String
                     val newText = message.parameters["new_text"] as? String
+                    val startLineNumber = message.parameters["start_line_number"]?.let { value ->
+                        when (value) {
+                            is Number -> value.toInt()
+                            is String -> value.toIntOrNull() ?: 1
+                            else -> 1
+                        }
+                    } ?: 1
                     if (oldText != null && newText != null) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Column(
@@ -1803,7 +1810,7 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                                 modifier = Modifier.padding(8.dp)
                             )
                             val diffScrollState = rememberLazyListState()
-                            val diffLines = remember(oldText, newText) {
+                            val diffLines = remember(oldText, newText, startLineNumber) {
                                 computeDiff(oldText, newText)
                             }
                             
@@ -1816,6 +1823,22 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                             ) {
                                 items(diffLines.size) { index ->
                                     val diffLine = diffLines[index]
+                                    // 计算实际文件行号
+                                    val actualLineNumber = when (diffLine.type) {
+                                        DiffType.ADD -> {
+                                            // 新增行：显示在新文件中的行号
+                                            // 简单计算：起始行号 + 新增行在新文本中的行号 - 1
+                                            startLineNumber + diffLine.lineNumber - 1
+                                        }
+                                        DiffType.DELETE -> {
+                                            // 删除行：显示在旧文件中的行号
+                                            startLineNumber + diffLine.lineNumber - 1
+                                        }
+                                        DiffType.KEEP -> {
+                                            // 未更改行：显示在文件中的行号
+                                            startLineNumber + diffLine.lineNumber - 1
+                                        }
+                                    }
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically
@@ -1840,7 +1863,7 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                                         )
                                         // 显示行号
                                         Text(
-                                            text = "${diffLine.lineNumber}.",
+                                            text = "${actualLineNumber}.",
                                             style = JewelTheme.defaultTextStyle.copy(
                                                 color = Color.LightGray,
                                                 fontSize = 10.sp

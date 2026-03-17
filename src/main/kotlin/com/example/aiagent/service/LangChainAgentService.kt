@@ -523,7 +523,16 @@ class LangChainAgentService(private val project: Project) {
                     val mutableParams = params.toMutableMap()
                     dataMap.forEach { (key, value) ->
                         if (key is String) {
-                            mutableParams[key] = value as Any
+                            // 如果值是Map，将其条目展开到mutableParams中
+                            if (value is Map<*, *>) {
+                                value.forEach { (nestedKey, nestedValue) ->
+                                    if (nestedKey is String) {
+                                        mutableParams[nestedKey] = nestedValue as Any
+                                    }
+                                }
+                            } else {
+                                mutableParams[key] = value as Any
+                            }
                         }
                     }
                     mutableParams.toMap()
