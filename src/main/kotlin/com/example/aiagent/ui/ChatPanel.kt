@@ -496,10 +496,17 @@ fun ChatPanel() {
                                         var currentAiMessageId = aiMessageId
                                         var shouldCreateNewAiMessage = false
                                         val messageContents = mutableMapOf<String, String>()
+                                        // 保存初始消息的初始空内容
+                                        messageContents[aiMessageId] = currentContent
                                         
                                         val result = langChainService.sendMessage(
                                             message = originalInput,
                                             onChunk = { chunk ->
+                                                // 检查是否已取消
+                                                if (langChainService?.isCancelled() == true) {
+                                                    log("已取消，跳过处理 chunk")
+                                                    return@sendMessage
+                                                }
                                                 // 移除 isSending 检查，因为 invokeLater 可能在 isSending 变为 false 后执行
                                                 log("收到 LangChain4j 消息 chunk: ${chunk.take(50)}...")
                                                 isGenerating = true
@@ -533,6 +540,8 @@ fun ChatPanel() {
                                                         // 更新当前消息 ID 和内容
                                                         currentAiMessageId = newAiMessageId
                                                         currentContent = ""
+                                                        // 保存新消息的初始空内容
+                                                        messageContents[currentAiMessageId] = currentContent
                                                         shouldCreateNewAiMessage = false
                                                         
                                                         // 现在添加新的 chunk
@@ -603,7 +612,8 @@ fun ChatPanel() {
                                                     log("响应完成后滚动到底部")
                                                     // 延迟一下让Compose有时间计算新的布局
                                                     delay(100)
-                                                    scrollState.animateScrollTo(scrollState.maxValue)
+                                                    // 使用 scrollTo 而不是 animateScrollTo 来避免 MonotonicFrameClock 问题
+                                                    scrollState.scrollTo(scrollState.maxValue)
                                                 }
                                             },
                                             onToolCall = { toolCall ->
@@ -668,7 +678,8 @@ fun ChatPanel() {
                                                         messages.value = newMessages
                                                         
                                                         // 滚动到最新的消息
-                                                        scrollState.animateScrollTo(scrollState.maxValue)
+                                                        // 使用 scrollTo 而不是 animateScrollTo 来避免 MonotonicFrameClock 问题
+                                                        scrollState.scrollTo(scrollState.maxValue)
                                                         
                                                         // 更新 ChatStateService 中的 token 统计信息
                                                         val currentSession = chatStateService.currentSession
@@ -707,7 +718,8 @@ fun ChatPanel() {
                                                         )
                                                         
                                                         // 滚动到更新的工具调用消息的底部
-                                                        scrollState.animateScrollTo(scrollState.maxValue)
+                                                        // 使用 scrollTo 而不是 animateScrollTo 来避免 MonotonicFrameClock 问题
+                                                        scrollState.scrollTo(scrollState.maxValue)
                                                     } else {
                                                         // 如果没有找到，记录日志
                                                         log("未找到工具调用: $toolName")
@@ -761,7 +773,8 @@ fun ChatPanel() {
                                                 delay(200)
                                                 if (newMessages.isNotEmpty()) {
                                                     log("消息完成后滚动到底部")
-                                                    scrollState.animateScrollTo(scrollState.maxValue)
+                                                    // 使用 scrollTo 而不是 animateScrollTo 来避免 MonotonicFrameClock 问题
+                                                    scrollState.scrollTo(scrollState.maxValue)
                                                 }
                                             }
                                             
@@ -1131,14 +1144,14 @@ private fun AiMessageItem(message: AiMessage) {
                     style = JewelTheme.defaultTextStyle.copy(color = Color.White)
                 )
             }
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // 只在有token统计的文本框显示时间和生成中信息
-                if (message.tokenUsage != null) {
+            // 只在有token统计的文本框显示间距和状态信息
+            if (message.tokenUsage != null) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(modifier = Modifier.height(16.dp)) {
                         if (message.isGenerating) {
                             Text(
@@ -1201,7 +1214,8 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
             // 延迟一下让Compose有时间计算新的布局
             delay(100)
             // 滚动到底部
-            scrollState?.animateScrollTo(scrollState.maxValue)
+            // 使用 scrollTo 而不是 animateScrollTo 来避免 MonotonicFrameClock 问题
+            scrollState?.scrollTo(scrollState.maxValue)
         }
     }
     

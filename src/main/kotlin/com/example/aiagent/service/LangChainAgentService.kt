@@ -22,13 +22,13 @@ class LangChainAgentService(private val project: Project) {
 
     companion object {
         /** 工具调用最大轮数 */
-        private const val MAX_TOOL_ROUNDS = 10
+        private const val MAX_TOOL_ROUNDS = 35
         /** 截断续传最大次数（finish_reason=length 时自动继续） */
-        private const val MAX_CONTINUATION_ROUNDS = 3
+        private const val MAX_CONTINUATION_ROUNDS = 5
         /** 最大历史消息数（保留最近 N 条） */
         private const val MAX_HISTORY_MESSAGES = 20
         /** 单条消息最大字符数 */
-        private const val MAX_MESSAGE_LENGTH = 4000
+        private const val MAX_MESSAGE_LENGTH = 10240
         /** 工具结果截断长度 */
         private const val MAX_TOOL_RESULT_LENGTH = 6000
     }
