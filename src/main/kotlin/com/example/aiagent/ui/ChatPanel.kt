@@ -555,8 +555,10 @@ fun ChatPanel() {
                                                             )
                                                             newMessages[aiMessageIndex] = updatedMessage
                                                             messages.value = newMessages
-                                                            // 在消息框显示完后打印日志
-                                                            log("收到 LangChain4j 消息 chunk: ${chunk.take(50)}...")
+                                                            // 只在chunk长度大于50或包含换行时打印日志，减少打印频率
+                                                            if (chunk.length > 50 || chunk.contains('\n')) {
+                                                                log("收到 LangChain4j 消息 chunk: ${chunk.take(50)}...")
+                                                            }
                                                         }
                                                     }
                                                 } else {
@@ -574,8 +576,10 @@ fun ChatPanel() {
                                                             )
                                                             newMessages[aiMessageIndex] = updatedMessage
                                                             messages.value = newMessages
-                                                            // 在消息框显示完后打印日志
-                                                            log("收到 LangChain4j 消息 chunk: ${chunk.take(50)}...")
+                                                            // 只在chunk长度大于50或包含换行时打印日志，减少打印频率
+                                                            if (chunk.length > 50 || chunk.contains('\n')) {
+                                                                log("收到 LangChain4j 消息 chunk: ${chunk.take(50)}...")
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -645,7 +649,9 @@ fun ChatPanel() {
                                                         )
                                                         newMessages[existingIndex] = updatedToolCall
                                                         log("更新工具调用消息: ${toolCall.toolName}")
-                                                        chatStateService.updateToolCallMessage(updatedToolCall.id, updatedToolCall.isExecuting, updatedToolCall.result, updatedToolCall.output)
+                                                        // 将parameters转换为Map<String, String>
+                                                        val paramsAsStringMap = updatedToolCall.parameters.mapValues { it.value.toString() }
+                                                        chatStateService.updateToolCallMessage(updatedToolCall.id, updatedToolCall.isExecuting, updatedToolCall.result, updatedToolCall.output, paramsAsStringMap)
                                                     } else {
                                                         // 查找最后一个 AI 消息的索引，在它之前添加工具调用消息
                                                         val aiMessageIndex = newMessages.indexOfLast { it is AiMessage }
@@ -724,11 +730,14 @@ fun ChatPanel() {
                                                         )
                                                         newMessages[toolCallIndex] = updatedToolCall
                                                         messages.value = newMessages
+                                                        // 保留现有的parameters
+                                                        val paramsAsStringMap = existingToolCall.parameters.mapValues { it.value.toString() }
                                                         chatStateService.updateToolCallMessage(
                                                             updatedToolCall.id,
                                                             updatedToolCall.isExecuting,
                                                             updatedToolCall.result,
-                                                            updatedToolCall.output
+                                                            updatedToolCall.output,
+                                                            paramsAsStringMap
                                                         )
                                                         
                                                         // 滚动到更新的工具调用消息的底部
@@ -1307,8 +1316,82 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.weight(1f)
                         ) {
+                            // 对于读取文件工具，将行号信息拼接到文件名后面
+                            val displayFileName = if (message.toolName == "read_file") {
+                                val totalLineCount = message.parameters["lineCount"].let { value ->
+                                    when (value) {
+                                        is Number -> value.toInt()
+                                        is String -> value.toIntOrNull() ?: 0
+                                        else -> 0
+                                    }
+                                }
+                                val actualStartLine = message.parameters["actualStartLine"].let { value ->
+                                    when (value) {
+                                        is Number -> value.toInt()
+                                        is String -> value.toIntOrNull()
+                                        else -> null
+                                    }
+                                }
+                                val actualEndLine = message.parameters["actualEndLine"].let { value ->
+                                    when (value) {
+                                        is Number -> value.toInt()
+                                        is String -> value.toIntOrNull()
+                                        else -> null
+                                    }
+                                }
+                                
+                                val lineRangeText = if (actualStartLine != null && actualEndLine != null && actualStartLine > 0 && actualEndLine > 0) {
+                                    // 总是显示行号范围，格式：L20-50
+                                    "L${actualStartLine}-${actualEndLine}"
+                                } else {
+                                    // 旧版本或无行范围信息，显示总行数
+                                    "L1-${totalLineCount}"
+                                }
+                                
+                                // 智能路径显示：尝试显示尽可能多的路径信息
+                                 fileName?.let { path ->
+                                     val file = java.io.File(path)
+                                     val baseName = file.name
+                                     val parent = file.parent
+                                     val isFullPath = path == fileName // 检查是否完整路径
+                                     
+                                     // 策略1：显示完整路径（如果不太长）
+                                     val fullPath = "$path $lineRangeText"
+                                     if (fullPath.length <= 50) {
+                                         // 完整路径不太长，直接显示
+                                         return@let fullPath
+                                     }
+                                     
+                                     // 策略2：显示最后两级目录（如果有）
+                                     if (parent != null) {
+                                         val parentParts = parent.split(java.io.File.separatorChar)
+                                         if (parentParts.size >= 2) {
+                                             val lastTwoDirs = parentParts.takeLast(2).joinToString(java.io.File.separator)
+                                             val pathWithTwoDirs = "...$lastTwoDirs${java.io.File.separator}$baseName $lineRangeText"
+                                             if (pathWithTwoDirs.length <= 60) {
+                                                 return@let pathWithTwoDirs
+                                             }
+                                         }
+                                         
+                                         // 策略3：显示最后一级目录
+                                         val lastDir = parentParts.lastOrNull()
+                                         if (lastDir != null) {
+                                             val pathWithLastDir = "...$lastDir${java.io.File.separator}$baseName $lineRangeText"
+                                             if (pathWithLastDir.length <= 60) {
+                                                 return@let pathWithLastDir
+                                             }
+                                         }
+                                     }
+                                     
+                                     // 策略4：只显示文件名（前面加...表示路径被省略）
+                                     "...$baseName $lineRangeText"
+                                 } ?: fileName
+                            } else {
+                                fileName
+                            }
+                            
                             Text(
-                                text = fileName,
+                                text = displayFileName ?: "",
                                 style = JewelTheme.defaultTextStyle.copy(
                                     color = Color.LightGray,
                                     fontSize = 11.sp
@@ -1495,6 +1578,52 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                                 style = JewelTheme.defaultTextStyle.copy(
                                     color = Color.LightGray,
                                     fontSize = 10.sp
+                                )
+                            )
+                        }
+                    } else if (message.toolName == "read_file") {
+                        // 显示读取文件的行号范围（当没有文件名时）
+                        val totalLineCount = message.parameters["lineCount"].let { value ->
+                            when (value) {
+                                is Number -> value.toInt()
+                                is String -> value.toIntOrNull() ?: 0
+                                else -> 0
+                            }
+                        }
+                        val actualStartLine = message.parameters["actualStartLine"].let { value ->
+                            when (value) {
+                                is Number -> value.toInt()
+                                is String -> value.toIntOrNull()
+                                else -> null
+                            }
+                        }
+                        val actualEndLine = message.parameters["actualEndLine"].let { value ->
+                            when (value) {
+                                is Number -> value.toInt()
+                                is String -> value.toIntOrNull()
+                                else -> null
+                            }
+                        }
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            val displayText = if (actualStartLine != null && actualEndLine != null && actualStartLine > 0 && actualEndLine > 0) {
+                                // 显示行号范围，格式：L20-50
+                                "L${actualStartLine}-${actualEndLine}"
+                            } else {
+                                // 旧版本或无行范围信息
+                                "L1-${totalLineCount}"
+                            }
+                            
+                            Text(
+                                text = displayText,
+                                style = JewelTheme.defaultTextStyle.copy(
+                                    color = Color.LightGray,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
                                 )
                             )
                         }

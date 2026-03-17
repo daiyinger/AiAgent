@@ -156,7 +156,7 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
         }
     }
     
-    fun updateToolCallMessage(messageId: String, isExecuting: Boolean, result: String?, output: String = "") {
+    fun updateToolCallMessage(messageId: String, isExecuting: Boolean, result: String?, output: String = "", parameters: Map<String, String>? = null) {
         val currentSessionState = currentSession
         if (currentSessionState != null) {
             val msgIndex = currentSessionState.messages.indexOfFirst { it.id == messageId && it.type == "tool" }
@@ -165,6 +165,9 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
                 currentSessionState.messages[msgIndex].result = result
                 if (output.isNotEmpty()) {
                     currentSessionState.messages[msgIndex].output = output
+                }
+                if (parameters != null) {
+                    currentSessionState.messages[msgIndex].parameters = parameters
                 }
             }
         }

@@ -22,7 +22,7 @@ class LangChainAgentService(private val project: Project) {
 
     companion object {
         /** 工具调用最大轮数 */
-        private const val MAX_TOOL_ROUNDS = 35
+        private const val MAX_TOOL_ROUNDS = 60
         /** 截断续传最大次数（finish_reason=length 时自动继续） */
         private const val MAX_CONTINUATION_ROUNDS = 5
         /** 最大历史消息数（保留最近 N 条） */
@@ -516,7 +516,21 @@ class LangChainAgentService(private val project: Project) {
         return when (toolResult) {
             is ToolResult.Success -> {
                 val result = toolResult.data.toString()
-                notifyToolCallUI(onToolCall, toolCallId, toolName, params,
+                // 如果data是Map类型，将其合并到params中传递给UI，以便显示额外信息（如lineCount）
+                val mergedParams = if (toolResult.data is Map<*, *>) {
+                    val dataMap = toolResult.data as Map<*, *>
+                    // 将原始params转换为可变的，并添加data中的键值对
+                    val mutableParams = params.toMutableMap()
+                    dataMap.forEach { (key, value) ->
+                        if (key is String) {
+                            mutableParams[key] = value as Any
+                        }
+                    }
+                    mutableParams.toMap()
+                } else {
+                    params
+                }
+                notifyToolCallUI(onToolCall, toolCallId, toolName, mergedParams,
                     isExecuting = false, result = "成功", output = result)
                 result
             }
