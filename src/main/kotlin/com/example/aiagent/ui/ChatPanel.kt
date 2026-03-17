@@ -445,6 +445,12 @@ fun ChatPanel() {
                             if (isSending) {
                                 isSending = false
                                 log("用户停止发送消息")
+                                // 停止当前正在进行的AI请求
+                                langChainService?.stopCurrentSession()
+                                // 重置取消标志，以便新会话可以正常进行
+                                langChainService?.resetCancellation()
+                                // 清除消息缓存，避免新会话使用旧缓存
+                                langChainService?.clearCache()
                             } else if (inputText.trim().isNotEmpty()) {
                                 val userMessage = UserMessage(
                                     id = System.currentTimeMillis().toString(),
@@ -487,41 +493,117 @@ fun ChatPanel() {
                                     CoroutineScope(Dispatchers.IO).launch {
                                         var currentContent = ""
                                         var isGenerating = true
+                                        var currentAiMessageId = aiMessageId
+                                        var shouldCreateNewAiMessage = false
+                                        val messageContents = mutableMapOf<String, String>()
                                         
                                         val result = langChainService.sendMessage(
                                             message = originalInput,
                                             onChunk = { chunk ->
                                                 // 移除 isSending 检查，因为 invokeLater 可能在 isSending 变为 false 后执行
-                                                log("收到LangChain4j消息chunk: ${chunk.take(50)}...")
-                                                currentContent += chunk
+                                                log("收到 LangChain4j 消息 chunk: ${chunk.take(50)}...")
                                                 isGenerating = true
-                                            },
-                                            onComplete = {
-                                                log("响应完成，更新AI消息，内容长度: ${currentContent.length}")
-                                                CoroutineScope(Dispatchers.Main).launch {
-                                                    val newMessages = messages.value.toMutableList()
-                                                    // 查找AI消息的索引，而不是使用size - 1
-                                                    val aiMessageIndex = newMessages.indexOfFirst { it is AiMessage && it.id == aiMessageId }
-                                                    if (aiMessageIndex >= 0) {
-                                                        log("找到AI消息索引: $aiMessageIndex")
-                                                        val updatedMessage = AiMessage(
-                                                            id = aiMessageId,
-                                                            content = currentContent,
-                                                            timestamp = aiMessageTimestamp,
-                                                            isGenerating = false,
-                                                            tokenUsage = tokenUsage,
+                                                
+                                                // 如果需要创建新的 AI 消息块，先创建
+                                                if (shouldCreateNewAiMessage) {
+                                                    CoroutineScope(Dispatchers.Main).launch {
+                                                        val newMessages = messages.value.toMutableList()
+                                                        val newAiMessageId = (System.currentTimeMillis() + 1).toString()
+                                                        val newAiMessageTimestamp = LocalDateTime.now()
+                                                        val newAiMessage = AiMessage(
+                                                            id = newAiMessageId,
+                                                            content = "",
+                                                            timestamp = newAiMessageTimestamp,
+                                                            isGenerating = false, // 中间的消息不显示生成中状态
                                                             modelName = settings.currentModel
                                                         )
-                                                        newMessages[aiMessageIndex] = updatedMessage
+                                                        // 找到最后一个工具调用消息的位置
+                                                        val lastToolCallIndex = newMessages.indexOfLast { it is ToolCallMessage }
+                                                        val insertPosition = if (lastToolCallIndex >= 0) {
+                                                            // 在最后一个工具调用之后插入
+                                                            lastToolCallIndex + 1
+                                                        } else {
+                                                            // 如果没有工具调用，添加到末尾
+                                                            newMessages.size
+                                                        }
+                                                        newMessages.add(insertPosition, newAiMessage)
                                                         messages.value = newMessages
-                                                        log("更新消息后，消息数量: ${newMessages.size}")
+                                                        chatStateService.addMessageToCurrentSessionAtPosition(newAiMessage.toMessageState(), insertPosition)
+                                                        log("创建新的 AI 消息块：$newAiMessageId")
+                                                        // 更新当前消息 ID 和内容
+                                                        currentAiMessageId = newAiMessageId
+                                                        currentContent = ""
+                                                        shouldCreateNewAiMessage = false
                                                         
-                                                        // 滚动到最新消息
-                                                        log("响应完成后滚动到底部")
-                                                        // 延迟一下让Compose有时间计算新的布局
-                                                        delay(100)
-                                                        scrollState.animateScrollTo(scrollState.maxValue)
+                                                        // 现在添加新的 chunk
+                                                        currentContent += chunk
+                                                        messageContents[currentAiMessageId] = currentContent
+                                                        
+                                                        val aiMessageIndex = newMessages.indexOfFirst { it is AiMessage && it.id == currentAiMessageId }
+                                                        if (aiMessageIndex >= 0) {
+                                                            val existingMessage = newMessages[aiMessageIndex] as AiMessage
+                                                            val updatedMessage = existingMessage.copy(
+                                                                content = currentContent
+                                                            )
+                                                            newMessages[aiMessageIndex] = updatedMessage
+                                                            messages.value = newMessages
+                                                        }
                                                     }
+                                                } else {
+                                                    currentContent += chunk
+                                                    // 保存当前消息的内容
+                                                    messageContents[currentAiMessageId] = currentContent
+                                                    // 实时更新 AI 消息的内容
+                                                    CoroutineScope(Dispatchers.Main).launch {
+                                                        val newMessages = messages.value.toMutableList()
+                                                        val aiMessageIndex = newMessages.indexOfFirst { it is AiMessage && it.id == currentAiMessageId }
+                                                        if (aiMessageIndex >= 0) {
+                                                            val existingMessage = newMessages[aiMessageIndex] as AiMessage
+                                                            val updatedMessage = existingMessage.copy(
+                                                                content = currentContent
+                                                            )
+                                                            newMessages[aiMessageIndex] = updatedMessage
+                                                            messages.value = newMessages
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            onComplete = {
+                                                log("响应完成，更新所有AI消息")
+                                                CoroutineScope(Dispatchers.Main).launch {
+                                                    val newMessages = messages.value.toMutableList()
+                                                    // 更新所有AI消息的内容和状态
+                                                    for (i in newMessages.indices) {
+                                                        if (newMessages[i] is AiMessage) {
+                                                            val aiMessage = newMessages[i] as AiMessage
+                                                            val savedContent = messageContents[aiMessage.id] ?: ""
+                                                            // 最后一个消息（总结消息）才设置token统计
+                                                            val shouldHaveTokenUsage = i == newMessages.indexOfLast { it is AiMessage }
+                                                            val updatedMessage = AiMessage(
+                                                                id = aiMessage.id,
+                                                                content = savedContent,
+                                                                timestamp = aiMessage.timestamp,
+                                                                isGenerating = false,
+                                                                tokenUsage = if (shouldHaveTokenUsage) tokenUsage else null,
+                                                                modelName = settings.currentModel
+                                                            )
+                                                            newMessages[i] = updatedMessage
+                                                        }
+                                                    }
+                                                    messages.value = newMessages
+                                                    
+                                                    // 更新 ChatStateService 中的消息内容
+                                                    for ((msgId, content) in messageContents) {
+                                                        chatStateService.updateMessageContent(msgId, content)
+                                                    }
+                                                    
+                                                    log("更新消息后，消息数量: ${newMessages.size}")
+                                                    
+                                                    // 滚动到最新消息
+                                                    log("响应完成后滚动到底部")
+                                                    // 延迟一下让Compose有时间计算新的布局
+                                                    delay(100)
+                                                    scrollState.animateScrollTo(scrollState.maxValue)
                                                 }
                                             },
                                             onToolCall = { toolCall ->
@@ -544,10 +626,10 @@ fun ChatPanel() {
                                                         // 查找最后一个 AI 消息的索引，在它之前添加工具调用消息
                                                         val aiMessageIndex = newMessages.indexOfLast { it is AiMessage }
                                                         if (aiMessageIndex >= 0) {
-                                                            // 在 AI 消息之前添加工具调用消息
-                                                            newMessages.add(aiMessageIndex, toolCall)
+                                                            // 在 AI 消息之后添加工具调用消息
+                                                            newMessages.add(aiMessageIndex + 1, toolCall)
                                                             // 在 sessionState.messages 中也添加到相同位置
-                                                            chatStateService.addMessageToCurrentSessionAtPosition(toolCall.toMessageState(), aiMessageIndex)
+                                                            chatStateService.addMessageToCurrentSessionAtPosition(toolCall.toMessageState(), aiMessageIndex + 1)
                                                         } else {
                                                             // 如果没有 AI 消息，添加到末尾
                                                             newMessages.add(toolCall)
@@ -555,6 +637,11 @@ fun ChatPanel() {
                                                         }
                                                         log("添加新工具调用消息: ${toolCall.toolName}")
                                                     }
+                                                    
+                                                    // 添加工具调用消息后，标记需要创建新的 AI 消息块
+                                                    // 但不立即创建，等待下一次 onChunk 调用时再创建
+                                                    shouldCreateNewAiMessage = true
+                                                    log("标记需要创建新的 AI 消息块")
                                                     
                                                     messages.value = newMessages
                                                 }
@@ -1050,38 +1137,44 @@ private fun AiMessageItem(message: AiMessage) {
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(modifier = Modifier.height(16.dp)) {
-                    if (message.isGenerating) {
-                        Text(
-                            text = "生成中...",
-                            style = JewelTheme.defaultTextStyle.copy(color = Color.Gray, fontSize = 12.sp)
-                        )
-                    } else {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            message.modelName?.let {
-                                Text(
-                                    text = it,
-                                    style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF4CAF50), fontSize = 10.sp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                            }
-                            message.tokenUsage?.let {
-                                Text(
-                                    text = "Tokens: in ${it.first}/out ${it.second}",
-                                    style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
+                // 只在有token统计的文本框显示时间和生成中信息
+                if (message.tokenUsage != null) {
+                    Box(modifier = Modifier.height(16.dp)) {
+                        if (message.isGenerating) {
+                            Text(
+                                text = "生成中...",
+                                style = JewelTheme.defaultTextStyle.copy(color = Color.Gray, fontSize = 12.sp)
+                            )
+                        } else {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                message.modelName?.let {
+                                    Text(
+                                        text = it,
+                                        style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF4CAF50), fontSize = 10.sp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+                                message.tokenUsage?.let {
+                                    Text(
+                                        text = "Tokens: in ${it.first}/out ${it.second}",
+                                        style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
                             }
                         }
                     }
+                    // 只在有token统计的文本框显示时间戳
+                    if (message.isGenerating) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = message.timestamp.format(DateTimeFormatter.ofPattern("HH:mm")),
+                            style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp)
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = message.timestamp.format(DateTimeFormatter.ofPattern("HH:mm")),
-                    style = JewelTheme.defaultTextStyle.copy(color = Color(0xFF888888), fontSize = 10.sp)
-                )
             }
         }
     }
@@ -1738,7 +1831,7 @@ class UserMessage(
 ) : ChatMessage(id, content, timestamp)
 
 // AI消息
-class AiMessage(
+data class AiMessage(
     override val id: String,
     override val content: String,
     override val timestamp: LocalDateTime,

@@ -53,6 +53,7 @@ class EditFileTool : Tool(
             var oldLineCount = 0
             var newLineCount = 0
 
+            var startLineNumber = 1
             if (document != null) {
                 // 文件存在，检查并替换内容
                 val fileContent = document.text
@@ -60,6 +61,11 @@ class EditFileTool : Tool(
                 if (!fileContent.contains(oldText)) {
                     return ToolResult.Error("Old text not found in file: $path")
                 }
+
+                // 计算 old_text 在文件中的起始行号
+                val oldTextIndex = fileContent.indexOf(oldText)
+                val textBeforeOldText = fileContent.substring(0, oldTextIndex)
+                startLineNumber = textBeforeOldText.lines().size
 
                 oldLineCount = oldText.lines().size
                 newLineCount = newText.lines().size
@@ -76,6 +82,7 @@ class EditFileTool : Tool(
 
                 oldLineCount = 0
                 newLineCount = newText.lines().size
+                startLineNumber = 1
 
                 val parentPath = resolvedPath.parent
                     ?: return ToolResult.Error("Cannot determine parent directory for: $path")
@@ -143,7 +150,8 @@ class EditFileTool : Tool(
                         "new_text_length" to newText.length,
                         "old_line_count" to oldLineCount,
                         "new_line_count" to newLineCount,
-                        "line_change" to lineChange
+                        "line_change" to lineChange,
+                        "start_line_number" to startLineNumber
                     )
                 )
             )

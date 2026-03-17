@@ -98,6 +98,7 @@ class LangChainAgentService(private val project: Project) {
                 val toolCallBuffer = mutableListOf<ToolCall>()
                 val reasoningContentBuffer = StringBuilder()  // DeepSeek 思维内容
                 var lastFinishReason: String? = null
+                var hasSentContentInStream = false  // 标记是否在流中发送过内容
 
                 // 流式请求
                 client.chatStream(currentMessages, tools).collect { chunk ->
@@ -118,12 +119,11 @@ class LangChainAgentService(private val project: Project) {
                             }
                             if (chunk.content.isNotEmpty()) {
                                 roundResponse.append(chunk.content)
-                                // FC 模式下实时发送文本内容，DSL 模式等解析后再发送
-                                if (!isDslMode) {
-                                    ApplicationManager.getApplication().invokeLater {
-                                        onChunk(chunk.content)
-                                    }
+                                // 实时发送文本内容，包括DSL模式
+                                ApplicationManager.getApplication().invokeLater {
+                                    onChunk(chunk.content)
                                 }
+                                hasSentContentInStream = true
                             }
                         }
                         is StreamChunk.Done -> { /* 流结束 */ }
@@ -149,14 +149,15 @@ class LangChainAgentService(private val project: Project) {
                     }
                 }
 
-                // DSL 模式下发送清理后的文本内容
-                if (isDslMode && !isCancelled.get()) {
-                    val cleanContent = roundResponse.toString()
-                    if (cleanContent.isNotEmpty()) {
-                        ApplicationManager.getApplication().invokeLater {
-                            onChunk(cleanContent)
-                        }
+                // 只有在没有在流中实时发送过内容时，才一次性发送
+                // 但是在发送工具调用之前，确保先发送已经累积的文本
+                val cleanContent = roundResponse.toString()
+                if (cleanContent.isNotEmpty() && !hasSentContentInStream && !isCancelled.get()) {
+                    ApplicationManager.getApplication().invokeLater {
+                        onChunk(cleanContent)
                     }
+                    // 标记为已发送，避免重复发送
+                    hasSentContentInStream = true
                 }
 
                 // ====== 处理 finish_reason = "length"（输出被截断） ======

@@ -170,6 +170,16 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
         }
     }
     
+    fun updateMessageContent(messageId: String, content: String) {
+        val currentSessionState = currentSession
+        if (currentSessionState != null) {
+            val msgIndex = currentSessionState.messages.indexOfFirst { it.id == messageId && it.type == "ai" }
+            if (msgIndex >= 0) {
+                currentSessionState.messages[msgIndex].content = content
+            }
+        }
+    }
+    
     fun clearCurrentSessionMessages() {
         currentSession?.messages?.clear()
     }
