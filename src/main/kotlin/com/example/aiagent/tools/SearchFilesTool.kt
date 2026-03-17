@@ -26,7 +26,12 @@ class SearchFilesTool : Tool(
         )
     )
 ) {
-    override suspend fun execute(project: Project, params: Map<String, Any>, onOutput: ((String) -> Unit)?): ToolResult {
+    override suspend fun execute(
+        project: Project,
+        params: Map<String, Any>,
+        onOutput: ((String) -> Unit)?,
+        isCancelled: (() -> Boolean)?
+    ): ToolResult {
         val pattern = params["pattern"] as? String ?: return ToolResult.Error("Missing required parameter: pattern")
         val maxResults = (params["max_results"] as? Number)?.toInt() ?: 20
         

@@ -12,7 +12,12 @@ abstract class Tool(
     val description: String,
     val parameters: List<ToolParameter>
 ) {
-    abstract suspend fun execute(project: Project, params: Map<String, Any>, onOutput: ((String) -> Unit)? = null): ToolResult
+    abstract suspend fun execute(
+        project: Project,
+        params: Map<String, Any>,
+        onOutput: ((String) -> Unit)? = null,
+        isCancelled: (() -> Boolean)? = null
+    ): ToolResult
 
     /**
      * 将模型传入的路径归一化：

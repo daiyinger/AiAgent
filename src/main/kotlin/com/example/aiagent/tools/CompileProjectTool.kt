@@ -2,6 +2,7 @@ package com.example.aiagent.tools
 
 import com.example.aiagent.service.LogService
 import com.intellij.openapi.project.Project
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -48,7 +49,12 @@ class CompileProjectTool : Tool(
         LogService.log("CompileProjectTool - $message")
     }
 
-    override suspend fun execute(project: Project, params: Map<String, Any>, onOutput: ((String) -> Unit)?): ToolResult {
+    override suspend fun execute(
+        project: Project,
+        params: Map<String, Any>,
+        onOutput: ((String) -> Unit)?,
+        isCancelled: (() -> Boolean)?
+    ): ToolResult {
         val mode = params["mode"] as? String ?: "build"
         val buildType = params["build_type"] as? String ?: "debug"
         val skipTests = params["skip_tests"] as? Boolean ?: false
@@ -98,6 +104,10 @@ class CompileProjectTool : Tool(
                             val reader = BufferedReader(InputStreamReader(process.inputStream))
                             var line: String?
                             while (reader.readLine().also { line = it } != null) {
+                                if (isCancelled?.invoke() == true) {
+                                    process.destroy()
+                                    return@launch
+                                }
                                 output.append(line).append("\n")
                                 log("Output: $line")
                                 line?.let { onOutput?.invoke("[OUT] $it") }
@@ -109,6 +119,10 @@ class CompileProjectTool : Tool(
                             val reader = BufferedReader(InputStreamReader(process.errorStream))
                             var line: String?
                             while (reader.readLine().also { line = it } != null) {
+                                if (isCancelled?.invoke() == true) {
+                                    process.destroy()
+                                    return@launch
+                                }
                                 errorOutput.append(line).append("\n")
                                 log("Error: $line")
                                 line?.let { onOutput?.invoke("[ERR] $it") }
@@ -116,9 +130,17 @@ class CompileProjectTool : Tool(
                             reader.close()
                         }
 
+                        while (process.isAlive) {
+                            if (isCancelled?.invoke() == true) {
+                                process.destroy()
+                                throw CancellationException("Compilation cancelled by user")
+                            }
+                            kotlinx.coroutines.delay(100)
+                        }
+
                         val exitCode = process.waitFor()
-                        outputJob.join()
-                        errorJob.join()
+                        outputJob.cancel()
+                        errorJob.cancel()
 
                         if (exitCode == 0) {
                             log("Compilation successful")

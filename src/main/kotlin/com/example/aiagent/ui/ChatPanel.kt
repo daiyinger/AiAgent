@@ -447,11 +447,13 @@ fun ChatPanel() {
                                 log("用户停止发送消息")
                                 // 停止当前正在进行的AI请求
                                 langChainService?.stopCurrentSession()
-                                // 重置取消标志，以便新会话可以正常进行
-                                langChainService?.resetCancellation()
+                                // 注意：不要在这里调用 resetCancellation()，因为工具可能还在执行中
                                 // 清除消息缓存，避免新会话使用旧缓存
                                 langChainService?.clearCache()
                             } else if (inputText.trim().isNotEmpty()) {
+                                // 重置取消标志，确保新请求可以正常进行
+                                langChainService?.resetCancellation()
+                                
                                 val userMessage = UserMessage(
                                     id = System.currentTimeMillis().toString(),
                                     content = inputText.trim(),
@@ -555,10 +557,8 @@ fun ChatPanel() {
                                                             )
                                                             newMessages[aiMessageIndex] = updatedMessage
                                                             messages.value = newMessages
-                                                            // 只在chunk长度大于50或包含换行时打印日志，减少打印频率
-                                                            if (chunk.length > 50 || chunk.contains('\n')) {
-                                                                log("收到 LangChain4j 消息 chunk: ${chunk.take(50)}...")
-                                                            }
+                                                            // 打印所有chunk
+                                                            log("收到 LangChain4j 消息 chunk: $chunk")
                                                         }
                                                     }
                                                 } else {
@@ -576,10 +576,8 @@ fun ChatPanel() {
                                                             )
                                                             newMessages[aiMessageIndex] = updatedMessage
                                                             messages.value = newMessages
-                                                            // 只在chunk长度大于50或包含换行时打印日志，减少打印频率
-                                                            if (chunk.length > 50 || chunk.contains('\n')) {
-                                                                log("收到 LangChain4j 消息 chunk: ${chunk.take(50)}...")
-                                                            }
+                                                            // 打印所有chunk
+                                                            log("收到 LangChain4j 消息 chunk: $chunk")
                                                         }
                                                     }
                                                 }
@@ -802,11 +800,22 @@ fun ChatPanel() {
                                             }
                                             
                                             result.onFailure { e ->
-                                                log("LangChain4j发送失败: ${e.message}")
-                                                NotificationGroupManager.getInstance()
-                                                    .getNotificationGroup("AI Agent Notifications")
-                                                    .createNotification("发送失败: ${e.message}", NotificationType.ERROR)
-                                                    .notify(null)
+                                                // 检查是否是用户取消操作
+                                                val isCancelled = e.message?.contains("cancelled", ignoreCase = true) == true ||
+                                                          e.message?.contains("取消", ignoreCase = true) == true ||
+                                                          e.message?.contains("Request cancelled") == true ||
+                                                          e.message?.contains("Compilation cancelled by user") == true ||
+                                                          e.message?.contains("Build cancelled by user") == true
+                                                
+                                                if (!isCancelled) {
+                                                    log("LangChain4j发送失败: ${e.message}")
+                                                    NotificationGroupManager.getInstance()
+                                                        .getNotificationGroup("AI Agent Notifications")
+                                                        .createNotification("发送失败: ${e.message}", NotificationType.ERROR)
+                                                        .notify(null)
+                                                } else {
+                                                    log("用户取消操作，不显示错误提示")
+                                                }
                                             }
                                         }
                                     }

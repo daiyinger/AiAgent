@@ -1,9 +1,22 @@
 package com.example.aiagent.tools
 
 import com.intellij.openapi.project.Project
+import java.util.concurrent.atomic.AtomicBoolean
 
 object ToolManager {
     private val tools = mutableMapOf<String, Tool>()
+
+    private val isToolCancelled = AtomicBoolean(false)
+
+    fun cancelToolExecution() {
+        isToolCancelled.set(true)
+    }
+
+    fun resetToolCancellation() {
+        isToolCancelled.set(false)
+    }
+
+    fun isToolCancelled(): Boolean = isToolCancelled.get()
 
     init {
         registerTools()
@@ -49,7 +62,7 @@ object ToolManager {
         val tool = getTool(toolName) ?: return ToolResult.Error("Tool '$toolName' not found")
 
         return try {
-            tool.execute(project, params, onOutput)
+            tool.execute(project, params, onOutput) { isToolCancelled() }
         } catch (e: Exception) {
             ToolResult.Error("Error executing tool '$toolName': ${e.message}")
         }

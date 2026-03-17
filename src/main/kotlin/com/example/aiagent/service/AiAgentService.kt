@@ -40,6 +40,7 @@ class AiAgentService {
         isCancelled.set(true)
         currentJob?.cancel()
         currentJob = null
+        ToolManager.cancelToolExecution()
     }
 
     /**
@@ -47,6 +48,7 @@ class AiAgentService {
      */
     fun resetCancellation() {
         isCancelled.set(false)
+        ToolManager.resetToolCancellation()
     }
 
     /**

@@ -16,7 +16,12 @@ class AndroidProjectAnalysisTool : Tool(
         )
     )
 ) {
-    override suspend fun execute(project: Project, params: Map<String, Any>, onOutput: ((String) -> Unit)?): ToolResult {
+    override suspend fun execute(
+        project: Project,
+        params: Map<String, Any>,
+        onOutput: ((String) -> Unit)?,
+        isCancelled: (() -> Boolean)?
+    ): ToolResult {
         val path = params["path"] as? String ?: ""
         
         return try {

@@ -43,9 +43,13 @@ class LangChainAgentService(private val project: Project) {
         isCancelled.set(true)
         currentJob?.cancel()
         currentJob = null
+        ToolManager.cancelToolExecution()
     }
 
-    fun resetCancellation() { isCancelled.set(false) }
+    fun resetCancellation() {
+        isCancelled.set(false)
+        ToolManager.resetToolCancellation()
+    }
     fun isCancelled(): Boolean = isCancelled.get()
 
     /**
@@ -238,9 +242,17 @@ class LangChainAgentService(private val project: Project) {
 
                 // 执行所有工具调用
                 for (toolCall in resolvedToolCalls) {
-                    if (isCancelled.get()) break
+                    if (isCancelled.get()) {
+                        log("检测到取消，停止执行工具调用")
+                        break
+                    }
 
                     val resultContent = executeToolCall(toolCall, onToolCall, onToolOutput)
+
+                    if (isCancelled.get()) {
+                        log("工具执行完成后检测到取消，停止执行")
+                        break
+                    }
 
                     val truncatedResult = if (resultContent.length > MAX_TOOL_RESULT_LENGTH) {
                         resultContent.take(MAX_TOOL_RESULT_LENGTH) + "\n... [已截断，原长度 ${resultContent.length}]"

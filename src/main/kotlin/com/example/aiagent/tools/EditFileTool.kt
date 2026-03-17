@@ -19,7 +19,12 @@ class EditFileTool : Tool(
         ToolParameter(name = "end_line", type = "integer", description = "The ending line number (1-based) to replace.", required = false)
     )
 ) {
-    override suspend fun execute(project: Project, params: Map<String, Any>, onOutput: ((String) -> Unit)?): ToolResult {
+    override suspend fun execute(
+        project: Project,
+        params: Map<String, Any>,
+        onOutput: ((String) -> Unit)?,
+        isCancelled: (() -> Boolean)?
+    ): ToolResult {
         val path = params["path"] as? String ?: return ToolResult.Error("Missing required parameter: path")
         // 预处理：统一将 \r\n 替换为 \n，防止 AI 产生的系统级换行符差异导致匹配失败
         val oldText = (params["old_text"] as? String)?.replace("\r\n", "\n") 

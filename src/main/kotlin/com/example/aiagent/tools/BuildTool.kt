@@ -22,7 +22,12 @@ class BuildTool : Tool(
         )
     )
 ) {
-    override suspend fun execute(project: Project, params: Map<String, Any>, onOutput: ((String) -> Unit)?): ToolResult {
+    override suspend fun execute(
+        project: Project,
+        params: Map<String, Any>,
+        onOutput: ((String) -> Unit)?,
+        isCancelled: (() -> Boolean)?
+    ): ToolResult {
         val task = params["task"] as? String ?: "build"
         
         return try {
@@ -69,11 +74,19 @@ class BuildTool : Tool(
                     if (outputType == ProcessOutputTypes.STDERR) {
                         errorOutput.append(text)
                     }
+                    onOutput?.invoke(text)
                 }
             })
             
             processHandler.startNotify()
-            processHandler.waitFor()
+            
+            while (!processHandler.isProcessTerminated) {
+                if (isCancelled?.invoke() == true) {
+                    processHandler.destroyProcess()
+                    return ToolResult.Error("Build cancelled by user")
+                }
+                kotlinx.coroutines.delay(100)
+            }
             
             val exitCode = processHandler.exitCode ?: -1
             
