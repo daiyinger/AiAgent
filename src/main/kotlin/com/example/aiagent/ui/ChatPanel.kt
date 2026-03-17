@@ -508,7 +508,6 @@ fun ChatPanel() {
                                                     return@sendMessage
                                                 }
                                                 // 移除 isSending 检查，因为 invokeLater 可能在 isSending 变为 false 后执行
-                                                log("收到 LangChain4j 消息 chunk: ${chunk.take(50)}...")
                                                 isGenerating = true
                                                 
                                                 // 如果需要创建新的 AI 消息块，先创建
@@ -556,6 +555,8 @@ fun ChatPanel() {
                                                             )
                                                             newMessages[aiMessageIndex] = updatedMessage
                                                             messages.value = newMessages
+                                                            // 在消息框显示完后打印日志
+                                                            log("收到 LangChain4j 消息 chunk: ${chunk.take(50)}...")
                                                         }
                                                     }
                                                 } else {
@@ -573,6 +574,8 @@ fun ChatPanel() {
                                                             )
                                                             newMessages[aiMessageIndex] = updatedMessage
                                                             messages.value = newMessages
+                                                            // 在消息框显示完后打印日志
+                                                            log("收到 LangChain4j 消息 chunk: ${chunk.take(50)}...")
                                                         }
                                                     }
                                                 }
@@ -585,7 +588,8 @@ fun ChatPanel() {
                                                     for (i in newMessages.indices) {
                                                         if (newMessages[i] is AiMessage) {
                                                             val aiMessage = newMessages[i] as AiMessage
-                                                            val savedContent = messageContents[aiMessage.id] ?: ""
+                                                            // 只有当messageContents中存在该消息的内容时才更新，否则保持原有内容
+                                                            val savedContent = messageContents[aiMessage.id] ?: aiMessage.content
                                                             // 最后一个消息（总结消息）才设置token统计
                                                             val shouldHaveTokenUsage = i == newMessages.indexOfLast { it is AiMessage }
                                                             val updatedMessage = AiMessage(
@@ -593,7 +597,7 @@ fun ChatPanel() {
                                                                 content = savedContent,
                                                                 timestamp = aiMessage.timestamp,
                                                                 isGenerating = false,
-                                                                tokenUsage = if (shouldHaveTokenUsage) tokenUsage else null,
+                                                                tokenUsage = if (shouldHaveTokenUsage) tokenUsage else aiMessage.tokenUsage,
                                                                 modelName = settings.currentModel
                                                             )
                                                             newMessages[i] = updatedMessage
@@ -604,6 +608,16 @@ fun ChatPanel() {
                                                     // 更新 ChatStateService 中的消息内容
                                                     for ((msgId, content) in messageContents) {
                                                         chatStateService.updateMessageContent(msgId, content)
+                                                    }
+                                                    
+                                                    // 确保所有AI消息的内容都被保存到ChatStateService
+                                                    for (message in newMessages) {
+                                                        if (message is AiMessage) {
+                                                            // 只有当messageContents中不存在时才需要更新，避免覆盖
+                                                            if (!messageContents.containsKey(message.id)) {
+                                                                chatStateService.updateMessageContent(message.id, message.content)
+                                                            }
+                                                        }
                                                     }
                                                     
                                                     log("更新消息后，消息数量: ${newMessages.size}")
