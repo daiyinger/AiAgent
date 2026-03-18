@@ -148,13 +148,23 @@ class LangChainAgentService(private val project: Project) {
                 // 如果 FC 没有返回 tool calls，尝试从文本解析 DSL 格式
                 if (resolvedToolCalls.isEmpty() && !isCancelled.get()) {
                     val responseText = roundResponse.toString()
-                    val dslToolCalls = parseDslToolCalls(responseText)
+                    val reasoningText = reasoningContentBuffer.toString()
+                    
+                    // 先从 reasoning 中解析 DSL 工具调用
+                    var dslToolCalls = parseDslToolCalls(reasoningText)
                     if (dslToolCalls.isNotEmpty()) {
-                        log("从文本解析到 ${dslToolCalls.size} 个 DSL 工具调用")
+                        log("从 reasoning 解析到 ${dslToolCalls.size} 个 DSL 工具调用")
                         resolvedToolCalls = dslToolCalls
-                        val cleanText = removeDslFromText(responseText)
-                        roundResponse.clear()
-                        roundResponse.append(cleanText)
+                    } else {
+                        // 如果 reasoning 中没有，再从 response 中解析
+                        dslToolCalls = parseDslToolCalls(responseText)
+                        if (dslToolCalls.isNotEmpty()) {
+                            log("从文本解析到 ${dslToolCalls.size} 个 DSL 工具调用")
+                            resolvedToolCalls = dslToolCalls
+                            val cleanText = removeDslFromText(responseText)
+                            roundResponse.clear()
+                            roundResponse.append(cleanText)
+                        }
                     }
                 }
 
