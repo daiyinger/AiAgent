@@ -17,8 +17,12 @@ import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -184,8 +188,155 @@ fun ChatPanel() {
                 )
             }
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(end = 12.dp)  // 整体往左移动半个图标宽度
             ) {
+                // 新建会话按钮（放在历史会话气泡左侧）
+                IconButton(
+                    onClick = {
+                        // 停止当前正在进行的AI请求
+                        langChainService?.stopCurrentSession()
+                        // 清除消息缓存，避免新会话使用旧缓存
+                        langChainService?.clearCache()
+                        // 创建新会话
+                        val newSession = chatStateService.createNewSession()
+                        sessions.value = chatStateService.sessions.toMutableList()
+                        currentSessionIndex = sessions.value.size - 1
+                        chatStateService.currentSessionIndex = currentSessionIndex
+                        messages.value = mutableListOf()
+                        isSending = false
+                        inputText = ""
+                        log("创建新会话")
+                    },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    // 使用 Canvas 绘制会话气泡+号图标
+                    Canvas(modifier = Modifier.size(18.dp)) {
+                        val width = size.width
+                        val height = size.height
+                        val strokeWidth = 1.2f
+                        
+                        // 气泡主体参数
+                        val bubbleWidth = width * 0.85f
+                        val bubbleHeight = height * 0.7f
+                        val left = (width - bubbleWidth) / 2
+                        val top = (height - bubbleHeight) / 2
+                        val right = left + bubbleWidth
+                        val bottom = top + bubbleHeight
+                        val cornerRadius = 3f
+                        
+                        // 尾巴参数（右下角）
+                        val tailSize = 4f
+                        
+                        // 计算关键点坐标
+                        val rightLineEndY = bottom - cornerRadius - tailSize  // 右边线终点Y坐标
+                        val bottomLineEndX = right - cornerRadius - tailSize  // 底边线终点X坐标
+                        
+                        // 绘制直线边
+                        // 上边
+                        drawLine(
+                            color = Color.White,
+                            start = Offset(left + cornerRadius, top),
+                            end = Offset(right - cornerRadius, top),
+                            strokeWidth = strokeWidth
+                        )
+                        // 左边
+                        drawLine(
+                            color = Color.White,
+                            start = Offset(left, top + cornerRadius),
+                            end = Offset(left, bottom - cornerRadius),
+                            strokeWidth = strokeWidth
+                        )
+                        // 右边（从顶部圆角结束到尾巴开始）
+                        drawLine(
+                            color = Color.White,
+                            start = Offset(right, top + cornerRadius),
+                            end = Offset(right, rightLineEndY),
+                            strokeWidth = strokeWidth
+                        )
+                        // 底边（从左边圆角结束到尾巴开始）
+                        drawLine(
+                            color = Color.White,
+                            start = Offset(left + cornerRadius, bottom),
+                            end = Offset(bottomLineEndX, bottom),
+                            strokeWidth = strokeWidth
+                        )
+                        
+                        // 绘制三个圆角（除了右下角）
+                        // 左上
+                        drawArc(
+                            color = Color.White,
+                            startAngle = 180f,
+                            sweepAngle = 90f,
+                            useCenter = false,
+                            topLeft = Offset(left, top),
+                            size = Size(cornerRadius * 2, cornerRadius * 2),
+                            style = Stroke(width = strokeWidth)
+                        )
+                        // 右上
+                        drawArc(
+                            color = Color.White,
+                            startAngle = 270f,
+                            sweepAngle = 90f,
+                            useCenter = false,
+                            topLeft = Offset(right - cornerRadius * 2, top),
+                            size = Size(cornerRadius * 2, cornerRadius * 2),
+                            style = Stroke(width = strokeWidth)
+                        )
+                        // 左下
+                        drawArc(
+                            color = Color.White,
+                            startAngle = 90f,
+                            sweepAngle = 90f,
+                            useCenter = false,
+                            topLeft = Offset(left, bottom - cornerRadius * 2),
+                            size = Size(cornerRadius * 2, cornerRadius * 2),
+                            style = Stroke(width = strokeWidth)
+                        )
+                        
+                        // 绘制右下角尾巴（三角形）
+                        val tailTipX = right - tailSize / 2
+                        val tailTipY = bottom + tailSize
+                        
+                        // 尾巴左边：从底边终点到尾巴尖端
+                        drawLine(
+                            color = Color.White,
+                            start = Offset(bottomLineEndX, bottom),
+                            end = Offset(tailTipX, tailTipY),
+                            strokeWidth = strokeWidth
+                        )
+                        // 尾巴右边：从尾巴尖端到右边终点
+                        drawLine(
+                            color = Color.White,
+                            start = Offset(tailTipX, tailTipY),
+                            end = Offset(right, rightLineEndY),
+                            strokeWidth = strokeWidth
+                        )
+                        
+                        // 绘制 + 号（居中）
+                        val plusSize = 4.5f
+                        val centerX = width / 2
+                        val centerY = (top + bottom) / 2
+                        
+                        // 横线
+                        drawLine(
+                            color = Color.White,
+                            start = Offset(centerX - plusSize / 2, centerY),
+                            end = Offset(centerX + plusSize / 2, centerY),
+                            strokeWidth = 1.5f,
+                            cap = StrokeCap.Round
+                        )
+                        // 竖线
+                        drawLine(
+                            color = Color.White,
+                            start = Offset(centerX, centerY - plusSize / 2),
+                            end = Offset(centerX, centerY + plusSize / 2),
+                            strokeWidth = 1.5f,
+                            cap = StrokeCap.Round
+                        )
+                    }
+                }
+                
                 // 历史会话下拉菜单
                 Box {
                     var expanded by remember { mutableStateOf(false) }
@@ -194,10 +345,39 @@ fun ChatPanel() {
                         onClick = { expanded = true },
                         modifier = Modifier.size(24.dp)
                     ) {
-                        Text(
-                            text = "💬",
-                            style = JewelTheme.defaultTextStyle.copy(fontSize = 14.sp)
-                        )
+                        // 使用 Canvas 绘制镂空时钟图标（与+号大小一致）
+                        Canvas(modifier = Modifier.size(18.dp)) {
+                            val centerX = size.width / 2
+                            val centerY = size.height / 2
+                            val radius = size.minDimension / 2 - 1
+                            
+                            // 绘制外圆（镂空，只有边框）
+                            drawCircle(
+                                color = Color.White,
+                                radius = radius,
+                                center = Offset(centerX, centerY),
+                                style = Stroke(width = 1.2f)
+                            )
+                            
+                            // 绘制时钟指针（12点方向到3点方向）
+                            // 时针（指向12点方向）
+                            drawLine(
+                                color = Color.White,
+                                start = Offset(centerX, centerY),
+                                end = Offset(centerX, centerY - radius * 0.5f),
+                                strokeWidth = 1.2f,
+                                cap = StrokeCap.Round
+                            )
+                            
+                            // 分针（指向3点方向）
+                            drawLine(
+                                color = Color.White,
+                                start = Offset(centerX, centerY),
+                                end = Offset(centerX + radius * 0.7f, centerY),
+                                strokeWidth = 1.2f,
+                                cap = StrokeCap.Round
+                            )
+                        }
                     }
                     
                     // 自定义下拉菜单
@@ -213,53 +393,17 @@ fun ChatPanel() {
                                     .background(Color(0xFF2D2D2D), RoundedCornerShape(6.dp))
                                     .padding(4.dp)
                             ) {
-                                // 新建会话按钮
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            // 停止当前正在进行的AI请求
-                                            langChainService?.stopCurrentSession()
-                                            // 重置取消标志，以便新会话可以正常进行
-                                            //langChainService?.resetCancellation()
-                                            // 清除消息缓存，避免新会话使用旧缓存
-                                            langChainService?.clearCache()
-                                            // 创建新会话
-                                            val newSession = chatStateService.createNewSession()
-                                            sessions.value = chatStateService.sessions.toMutableList()
-                                            currentSessionIndex = sessions.value.size - 1
-                                            chatStateService.currentSessionIndex = currentSessionIndex
-                                            messages.value = mutableListOf()
-                                            isSending = false
-                                            expanded = false
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        "+",
-                                        style = JewelTheme.defaultTextStyle.copy(
-                                            color = Color(0xFF4CAF50),
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp
-                                        ),
-                                        modifier = Modifier.width(20.dp)
-                                    )
-                                    Text(
-                                        "New Chat",
-                                        style = JewelTheme.defaultTextStyle.copy(
-                                            color = Color.White,
-                                            fontSize = 13.sp
-                                        )
-                                    )
-                                }
+                                // 历史会话列表（已移除新建会话按钮，使用顶部+号按钮）
+                                // 过滤掉 New Chat/新会话 的空会话
+                                val filteredSessions = sessions.value
+                                    .filter { it.title != "New Chat" && it.title != "新会话" }
+                                    .sortedByDescending { it.timestamp }
                                 
-                                // 历史会话列表
                                 LazyColumn(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
-                                    items(sessions.value.sortedByDescending { it.timestamp }) { sessionState ->
+                                    items(filteredSessions) { sessionState ->
                                         val isActive = sessionState.id == currentSessionState.id
                                         Row(
                                             modifier = Modifier
@@ -288,6 +432,7 @@ fun ChatPanel() {
                                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                                 modifier = Modifier.weight(1f)
                                             )
+                                            // 删除按钮
                                             IconButton(
                                                 onClick = {
                                                     val index = sessions.value.indexOf(sessionState)
@@ -322,10 +467,61 @@ fun ChatPanel() {
                     onClick = { isSettingsOpen = true },
                     modifier = Modifier.size(24.dp)
                 ) {
-                    Text(
-                        text = "⚙",
-                        style = JewelTheme.defaultTextStyle.copy(fontSize = 16.sp)
-                    )
+                    // 使用 Canvas 绘制镂空齿轮图标
+                    Canvas(modifier = Modifier.size(18.dp)) {
+                        val centerX = size.width / 2
+                        val centerY = size.height / 2
+                        val outerRadius = size.minDimension / 2 - 1
+                        val innerRadius = outerRadius * 0.5f
+                        val teethCount = 8
+                        
+                        // 绘制齿轮齿（外圈）
+                        for (i in 0 until teethCount) {
+                            val angle = (i * 360f / teethCount) * (kotlin.math.PI / 180f).toFloat()
+                            val nextAngle = ((i + 1) * 360f / teethCount) * (kotlin.math.PI / 180f).toFloat()
+                            
+                            // 齿的外边缘
+                            val x1 = centerX + kotlin.math.cos(angle.toDouble()).toFloat() * outerRadius
+                            val y1 = centerY + kotlin.math.sin(angle.toDouble()).toFloat() * outerRadius
+                            val x2 = centerX + kotlin.math.cos(nextAngle.toDouble()).toFloat() * outerRadius
+                            val y2 = centerY + kotlin.math.sin(nextAngle.toDouble()).toFloat() * outerRadius
+                            
+                            // 齿的内边缘（稍微靠内）
+                            val midAngle = (angle + nextAngle) / 2
+                            val innerX1 = centerX + kotlin.math.cos(midAngle.toDouble() - 0.15).toFloat() * (outerRadius * 0.75f)
+                            val innerY1 = centerY + kotlin.math.sin(midAngle.toDouble() - 0.15).toFloat() * (outerRadius * 0.75f)
+                            val innerX2 = centerX + kotlin.math.cos(midAngle.toDouble() + 0.15).toFloat() * (outerRadius * 0.75f)
+                            val innerY2 = centerY + kotlin.math.sin(midAngle.toDouble() + 0.15).toFloat() * (outerRadius * 0.75f)
+                            
+                            // 绘制齿的轮廓
+                            drawLine(
+                                color = Color.White,
+                                start = Offset(x1, y1),
+                                end = Offset(innerX1, innerY1),
+                                strokeWidth = 1.2f
+                            )
+                            drawLine(
+                                color = Color.White,
+                                start = Offset(innerX1, innerY1),
+                                end = Offset(innerX2, innerY2),
+                                strokeWidth = 1.2f
+                            )
+                            drawLine(
+                                color = Color.White,
+                                start = Offset(innerX2, innerY2),
+                                end = Offset(x2, y2),
+                                strokeWidth = 1.2f
+                            )
+                        }
+                        
+                        // 绘制内圆（镂空）
+                        drawCircle(
+                            color = Color.White,
+                            radius = innerRadius,
+                            center = Offset(centerX, centerY),
+                            style = Stroke(width = 1.2f)
+                        )
+                    }
                 }
             }
         }
