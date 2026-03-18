@@ -71,7 +71,7 @@ class AndroidProjectAnalysisTool : Tool(
         var fileCount = 0
         
         // 需要排除的目录
-        val excludedDirs = setOf(".git", ".idea", "build", ".gradle", "node_modules", "target", "out", "bin", "obj")
+        val excludedDirs = setOf(".git", ".idea", "build", ".gradle", "node_modules", "target", "out", "bin", "obj", ".specstory")
         
         Files.walk(rootPath).use { stream ->
             stream.filter { path ->
