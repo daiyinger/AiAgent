@@ -29,17 +29,30 @@ class EditFileTool : Tool(
         isCancelled: (() -> Boolean)?
     ): ToolResult {
         val path = params["path"] as? String ?: return ToolResult.Error("Missing required parameter: path")
-        // 预处理：统一将 \r\n 替换为 \n，防止 AI 产生的系统级换行符差异导致匹配失败
-        val oldText = (params["old_text"] as? String)?.replace("\r\n", "\n") 
-            ?: return ToolResult.Error("Missing required parameter: old_text")
         val newText = (params["new_text"] as? String)?.replace("\r\n", "\n") 
             ?: return ToolResult.Error("Missing required parameter: new_text")
+        
+        // 预处理：统一将 \r\n 替换为 \n，防止 AI 产生的系统级换行符差异导致匹配失败
+        val oldText = (params["old_text"] as? String)?.replace("\r\n", "\n")
+        
+        // 检查是否提供了行号参数
+        val startLine = (params["start_line"] as? Number)?.toInt()
+        val endLine = (params["end_line"] as? Number)?.toInt()
+        
+        // 确保至少提供了 old_text 或行号
+        if (oldText == null && (startLine == null || endLine == null)) {
+            return ToolResult.Error("Missing required parameter: either 'old_text' or both 'start_line' and 'end_line' must be provided")
+        }
 
         log("开始执行编辑文件操作")
         log("参数: path=$path")
-        log("参数: oldText长度=${oldText.length}, 前50字符=${oldText.take(50)}")
+        if (oldText != null) {
+            log("参数: oldText长度=${oldText.length}, 前50字符=${oldText.take(50)}")
+        } else {
+            log("参数: oldText=null (使用行号模式)")
+        }
         log("参数: newText长度=${newText.length}, 前50字符=${newText.take(50)}")
-        log("参数: startLine=${params["start_line"]}, endLine=${params["end_line"]}")
+        log("参数: startLine=${startLine}, endLine=${endLine}")
 
         return try {
             val resolvedPath = resolveFilePath(project, path)
@@ -52,9 +65,11 @@ class EditFileTool : Tool(
                 log("文件已存在，开始编辑: ${virtualFile.path}")
                 handleExistingFile(project, virtualFile, path, mapOf(
                     "path" to path,
-                    "old_text" to oldText,
-                    "new_text" to newText
-                ))
+                    "old_text" to (oldText ?: ""),
+                    "new_text" to newText,
+                    "start_line" to (startLine ?: 0),
+                    "end_line" to (endLine ?: 0)
+                ) as Map<String, Any>)
             } else {
                 log("文件不存在，创建新文件: $path")
                 handleNewFile(project, path, newText)
@@ -80,7 +95,7 @@ class EditFileTool : Tool(
         log("handleExistingFile: startLine=$startLine, endLine=$endLine, oldText=${oldText?.take(30)}...")
 
         return try {
-            if (startLine != null && endLine != null) {
+            if (startLine != null && endLine != null && startLine > 0 && endLine > 0) {
                 // =============== 方案 A：基于行号精确替换 ===============
                 log("使用行号替换模式: startLine=$startLine, endLine=$endLine")
                 val lineCount = document.lineCount
@@ -139,12 +154,11 @@ class EditFileTool : Tool(
                     } 
                 } 
                 
-                // 2. 防御性检查：确保 oldText 在文件中是唯一的 
+                // 2. 防御性检查：确保 oldText 在文件中是唯一的
                 val secondIndex = fileContent.indexOf(cleanOld, startIndex + cleanOld.length)
                 log("唯一性检查: secondIndex=$secondIndex")
-                if (secondIndex != -1) { 
-                    log("错误: 文本重复出现")
-                    return ToolResult.Error("The 'old_text' provided appears multiple times. Please include 2-3 lines of surrounding context (above and below) to make it unique.") 
+                if (secondIndex != -1) {
+                    log("警告: 文本重复出现，将替换第一个匹配项")
                 } 
                 
                 // 找到唯一匹配，进行替换

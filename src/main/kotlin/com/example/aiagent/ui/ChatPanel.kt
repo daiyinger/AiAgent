@@ -450,6 +450,14 @@ fun ChatPanel() {
                                 // 注意：不要在这里调用 resetCancellation()，因为工具可能还在执行中
                                 // 清除消息缓存，避免新会话使用旧缓存
                                 langChainService?.clearCache()
+                                
+                                // 保存当前UI层的消息内容到ChatStateService
+                                log("保存当前消息状态")
+                                for (message in messages.value) {
+                                    if (message is AiMessage) {
+                                        chatStateService.updateMessageContent(message.id, message.content)
+                                    }
+                                }
                             } else if (inputText.trim().isNotEmpty()) {
                                 // 重置取消标志，确保新请求可以正常进行
                                 langChainService?.resetCancellation()
