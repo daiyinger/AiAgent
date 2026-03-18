@@ -25,11 +25,14 @@ object ToolManager {
     private fun registerTools() {
         registerTool(ReadFileTool())
         registerTool(EditFileTool())
+        registerTool(DeleteFileTool())
+        registerTool(CreateDirectoryTool())
         registerTool(BuildTool())
         registerTool(SearchFilesTool())
         registerTool(ListFilesTool())
         registerTool(AndroidProjectAnalysisTool())
         registerTool(CompileProjectTool())
+        registerTool(WebSearchTool())
     }
 
     private fun registerTool(tool: Tool) {
