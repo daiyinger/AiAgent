@@ -1166,7 +1166,9 @@ private fun AiMessageItem(message: AiMessage) {
             SelectionContainer {
                 Text(
                     text = message.content,
-                    style = JewelTheme.defaultTextStyle.copy(color = Color.White)
+                    style = JewelTheme.defaultTextStyle.copy(color = Color.White),
+                    softWrap = true,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
             // 只在有token统计的文本框显示间距和状态信息

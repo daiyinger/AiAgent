@@ -550,7 +550,9 @@ class LangChainAgentService(private val project: Project) {
         result = result.replace("""<tool_call>[\s\S]*?</tool_call>""".toRegex(), "")
         // 清理多余的空行
         result = result.replace("""\n{3,}""".toRegex(), "\n\n")
-        return result.trim()
+        // 确保换行符格式正确（统一为 \n）
+        result = result.replace("\r\n", "\n")
+        return result
     }
 
     /**
