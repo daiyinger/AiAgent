@@ -525,19 +525,12 @@ fun ChatPanel() {
                                                             isGenerating = false, // 中间的消息不显示生成中状态
                                                             modelName = settings.currentModel
                                                         )
-                                                        // 找到最后一个工具调用消息的位置
-                                                        val lastToolCallIndex = newMessages.indexOfLast { it is ToolCallMessage }
-                                                        val insertPosition = if (lastToolCallIndex >= 0) {
-                                                            // 在最后一个工具调用之后插入
-                                                            lastToolCallIndex + 1
-                                                        } else {
-                                                            // 如果没有工具调用，添加到末尾
-                                                            newMessages.size
-                                                        }
+                                                        // 简单地添加到消息列表末尾
+                                                        val insertPosition = newMessages.size
                                                         newMessages.add(insertPosition, newAiMessage)
                                                         messages.value = newMessages
                                                         chatStateService.addMessageToCurrentSessionAtPosition(newAiMessage.toMessageState(), insertPosition)
-                                                        log("创建新的 AI 消息块：$newAiMessageId")
+                                                        log("创建新的 AI 消息块：$newAiMessageId, 插入位置: $insertPosition")
                                                         // 更新当前消息 ID 和内容
                                                         currentAiMessageId = newAiMessageId
                                                         currentContent = ""
@@ -558,7 +551,7 @@ fun ChatPanel() {
                                                             newMessages[aiMessageIndex] = updatedMessage
                                                             messages.value = newMessages
                                                             // 打印所有chunk
-                                                            log("收到 LangChain4j 消息 chunk: $chunk")
+                                                            //log("收到 LangChain4j 消息 chunk: $chunk")
                                                         }
                                                     }
                                                 } else {
@@ -577,7 +570,7 @@ fun ChatPanel() {
                                                             newMessages[aiMessageIndex] = updatedMessage
                                                             messages.value = newMessages
                                                             // 打印所有chunk
-                                                            log("收到 LangChain4j 消息 chunk: $chunk")
+                                                            //log("收到 LangChain4j 消息 chunk: $chunk")
                                                         }
                                                     }
                                                 }
@@ -651,19 +644,11 @@ fun ChatPanel() {
                                                         val paramsAsStringMap = updatedToolCall.parameters.mapValues { it.value.toString() }
                                                         chatStateService.updateToolCallMessage(updatedToolCall.id, updatedToolCall.isExecuting, updatedToolCall.result, updatedToolCall.output, paramsAsStringMap)
                                                     } else {
-                                                        // 查找最后一个 AI 消息的索引，在它之前添加工具调用消息
-                                                        val aiMessageIndex = newMessages.indexOfLast { it is AiMessage }
-                                                        if (aiMessageIndex >= 0) {
-                                                            // 在 AI 消息之后添加工具调用消息
-                                                            newMessages.add(aiMessageIndex + 1, toolCall)
-                                                            // 在 sessionState.messages 中也添加到相同位置
-                                                            chatStateService.addMessageToCurrentSessionAtPosition(toolCall.toMessageState(), aiMessageIndex + 1)
-                                                        } else {
-                                                            // 如果没有 AI 消息，添加到末尾
-                                                            newMessages.add(toolCall)
-                                                            chatStateService.addMessageToCurrentSession(toolCall.toMessageState())
-                                                        }
-                                                        log("添加新工具调用消息: ${toolCall.toolName}")
+                                                        // 简单地添加到消息列表末尾
+                                                        val insertPosition = newMessages.size
+                                                        newMessages.add(insertPosition, toolCall)
+                                                        chatStateService.addMessageToCurrentSessionAtPosition(toolCall.toMessageState(), insertPosition)
+                                                        log("添加新工具调用消息: ${toolCall.toolName}, 插入位置: $insertPosition")
                                                     }
                                                     
                                                     // 添加工具调用消息后，标记需要创建新的 AI 消息块
@@ -716,11 +701,11 @@ fun ChatPanel() {
                                                 log("收到工具输出: $toolName - ${output.take(50)}...")
                                                 CoroutineScope(Dispatchers.Main).launch {
                                                     val newMessages = messages.value.toMutableList()
-                                                    // 查找最近的同名工具调用消息，不限制isExecuting状态
-                                                    val toolCallIndex = newMessages.indexOfLast { 
+                                                    // 查找最近的同名工具调用消息
+                                                    val toolCallIndex = newMessages.indexOfLast {
                                                         it is ToolCallMessage && it.toolName == toolName
                                                     }
-                                                    
+
                                                     if (toolCallIndex >= 0) {
                                                         val existingToolCall = newMessages[toolCallIndex] as ToolCallMessage
                                                         val updatedToolCall = existingToolCall.copy(
@@ -737,7 +722,7 @@ fun ChatPanel() {
                                                             updatedToolCall.output,
                                                             paramsAsStringMap
                                                         )
-                                                        
+
                                                         // 滚动到更新的工具调用消息的底部
                                                         // 使用 scrollTo 而不是 animateScrollTo 来避免 MonotonicFrameClock 问题
                                                         scrollState.scrollTo(scrollState.maxValue)

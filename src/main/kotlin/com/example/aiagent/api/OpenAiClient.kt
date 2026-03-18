@@ -39,6 +39,8 @@ class OpenAiClient(
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
 
         private fun log(message: String) = LogService.log("[OpenAiClient] $message")
+        private fun logNetworkSend(message: String) = LogService.logNetworkSend(message)
+        private fun logNetworkReceive(message: String) = LogService.logNetworkReceive(message)
 
         fun fromSettings(settings: AiAgentSettings.State): OpenAiClient {
             val provider = settings.providers.find { it.id == settings.currentProviderId }
@@ -182,6 +184,7 @@ class OpenAiClient(
                 os.write(requestBody.toByteArray(Charsets.UTF_8))
                 os.flush()
             }
+            logNetworkSend(requestBody)
 
             if (connection.responseCode != HttpURLConnection.HTTP_OK) {
                 val error = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error"
@@ -195,6 +198,7 @@ class OpenAiClient(
                     when {
                         currentLine.startsWith("data: ") -> {
                             val data = currentLine.substring(6)
+                            logNetworkReceive(currentLine)
                             if (data == "[DONE]") {
                                 onLine(StreamLine.Done)
                                 break
@@ -262,10 +266,13 @@ class OpenAiClient(
                 os.write(requestBody.toByteArray(Charsets.UTF_8))
                 os.flush()
             }
+            logNetworkSend(requestBody)
 
             val responseCode = connection.responseCode
             if (responseCode == HttpURLConnection.HTTP_OK) {
-                return connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                val responseText = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                logNetworkReceive(responseText)
+                return responseText
             }
 
             val errorBody = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
