@@ -691,6 +691,7 @@ class LangChainAgentService(private val project: Project) {
 
     /**
      * 构建优化的消息列表（Token 优化）
+     * 使用TokenOptimizer进行精确的token计算和智能历史选择
      */
     private fun buildOptimizedMessageList(
         currentMessage: String,
@@ -698,27 +699,37 @@ class LangChainAgentService(private val project: Project) {
     ): MutableList<ChatMessage> {
         val chatStateService = ChatStateService.instance
         val history = chatStateService.currentSession?.messages ?: emptyList()
+        val settings = AiAgentSettings.instance.state
+        val modelName = settings.currentModel
 
-        // 1. 截断历史：只保留最近 N 条有效消息
-        val recentHistory = history
-            .filter { it.type in listOf("user", "ai") && it.content.isNotEmpty() }
-            .takeLast(MAX_HISTORY_MESSAGES)
+        // 使用TokenOptimizer智能选择历史消息
+        val selectedHistory = TokenOptimizer.selectHistoryMessages(
+            history = history,
+            currentMessage = currentMessage,
+            modelName = modelName,
+            maxHistoryMessages = MAX_HISTORY_MESSAGES
+        )
 
-        log("历史消息: ${history.size} 条 -> 截断后 ${recentHistory.size} 条")
+        // 计算token统计
+        val currentTokens = TokenOptimizer.countTokens(currentMessage, modelName)
+        val historyTokens = selectedHistory.sumOf {
+            TokenOptimizer.countTokens(it.content, modelName)
+        }
+        val modelLimit = TokenOptimizer.getModelTokenLimit(modelName)
+
+        log("Token优化 - 模型: $modelName, 限制: $modelLimit")
+        log("历史消息: ${history.size} 条 -> 智能选择后 ${selectedHistory.size} 条")
+        log("Token使用 - 当前消息: $currentTokens, 历史消息: $historyTokens, 总计: ${currentTokens + historyTokens}")
 
         return buildList {
             // 系统提示（精简版）
             add(ChatMessage.System(buildOptimizedSystemPrompt(embedToolsInPrompt)))
 
-            // 历史消息（截断内容）
-            recentHistory.forEach { msg ->
-                val truncatedContent = if (msg.content.length > MAX_MESSAGE_LENGTH) {
-                    msg.content.take(MAX_MESSAGE_LENGTH) + "\n... [已截断]"
-                } else msg.content
-
+            // 历史消息（已优化）
+            selectedHistory.forEach { msg ->
                 when (msg.type) {
-                    "user" -> add(ChatMessage.User(truncatedContent))
-                    "ai" -> add(ChatMessage.Assistant(truncatedContent))
+                    "user" -> add(ChatMessage.User(msg.content))
+                    "ai" -> add(ChatMessage.Assistant(msg.content))
                 }
             }
 
@@ -809,20 +820,12 @@ class LangChainAgentService(private val project: Project) {
     }
 
     /**
-     * 估算 Token 数（优化算法）
+     * 估算 Token 数
+     * 使用TokenOptimizer进行精确计算
      */
     private fun estimateTokenCount(text: String): Int {
-        // 中文约 2 token/字，英文约 0.25 token/字符，代码约 1 token/字符
-        var count = 0
-        for (char in text) {
-            count += when {
-                char.code > 127 -> 2  // 中文/Unicode
-                char.isLetterOrDigit() -> 1
-                char.isWhitespace() -> 0
-                else -> 1
-            }
-        }
-        return (count / 2).coerceAtLeast(1)
+        val settings = AiAgentSettings.instance.state
+        return TokenOptimizer.countTokens(text, settings.currentModel)
     }
 
     // ========== 缓存 ==========
