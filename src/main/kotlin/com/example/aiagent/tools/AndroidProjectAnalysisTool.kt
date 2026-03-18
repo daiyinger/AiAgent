@@ -70,8 +70,17 @@ class AndroidProjectAnalysisTool : Tool(
         var directoryCount = 0
         var fileCount = 0
         
+        // 需要排除的目录
+        val excludedDirs = setOf(".git", ".idea", "build", ".gradle", "node_modules", "target", "out", "bin", "obj")
+        
         Files.walk(rootPath).use { stream ->
-            stream.forEach { path ->
+            stream.filter { path ->
+                // 过滤掉排除的目录及其子目录
+                val relativePath = path.toString().substringAfter(rootPath.toString()).replace("\\", "/")
+                excludedDirs.none { excluded ->
+                    relativePath.contains("/$excluded/") || relativePath.endsWith("/$excluded")
+                }
+            }.forEach { path ->
                 val relativePath = path.toString().substringAfter(rootPath.toString()).replace("\\", "/").removePrefix("/")
                 if (Files.isDirectory(path)) {
                     if (directoryCount < 50) { // 限制目录数量
@@ -105,8 +114,17 @@ class AndroidProjectAnalysisTool : Tool(
     private fun findBuildFiles(rootPath: Path): List<Map<String, Any>> {
         val buildFiles = mutableListOf<Map<String, Any>>()
         
+        // 需要排除的目录
+        val excludedDirs = setOf(".git", ".idea", "build", ".gradle", "node_modules", "target", "out", "bin", "obj")
+        
         Files.walk(rootPath).use { stream ->
-            stream.forEach { path ->
+            stream.filter { path ->
+                // 过滤掉排除的目录及其子目录
+                val relativePath = path.toString().substringAfter(rootPath.toString()).replace("\\", "/")
+                excludedDirs.none { excluded ->
+                    relativePath.contains("/$excluded/") || relativePath.endsWith("/$excluded")
+                }
+            }.forEach { path ->
                 val fileName = path.fileName.toString()
                 if (fileName == "build.gradle" || fileName == "build.gradle.kts") {
                     val relativePath = path.toString().substringAfter(rootPath.toString()).replace("\\", "/").removePrefix("/")
@@ -127,8 +145,17 @@ class AndroidProjectAnalysisTool : Tool(
     private fun findSourceFiles(rootPath: Path): List<Map<String, Any>> {
         val sourceFiles = mutableListOf<Map<String, Any>>()
         
+        // 需要排除的目录
+        val excludedDirs = setOf(".git", ".idea", "build", ".gradle", "node_modules", "target", "out", "bin", "obj")
+        
         Files.walk(rootPath).use { stream ->
-            stream.forEach { path ->
+            stream.filter { path ->
+                // 过滤掉排除的目录及其子目录
+                val relativePath = path.toString().substringAfter(rootPath.toString()).replace("\\", "/")
+                excludedDirs.none { excluded ->
+                    relativePath.contains("/$excluded/") || relativePath.endsWith("/$excluded")
+                }
+            }.forEach { path ->
                 val fileName = path.fileName.toString()
                 if (fileName.endsWith(".java") || fileName.endsWith(".kt")) {
                     val relativePath = path.toString().substringAfter(rootPath.toString()).replace("\\", "/").removePrefix("/")
@@ -148,8 +175,17 @@ class AndroidProjectAnalysisTool : Tool(
     private fun findManifestFiles(rootPath: Path): List<Map<String, Any>> {
         val manifestFiles = mutableListOf<Map<String, Any>>()
         
+        // 需要排除的目录
+        val excludedDirs = setOf(".git", ".idea", "build", ".gradle", "node_modules", "target", "out", "bin", "obj")
+        
         Files.walk(rootPath).use { stream ->
-            stream.forEach { path ->
+            stream.filter { path ->
+                // 过滤掉排除的目录及其子目录
+                val relativePath = path.toString().substringAfter(rootPath.toString()).replace("\\", "/")
+                excludedDirs.none { excluded ->
+                    relativePath.contains("/$excluded/") || relativePath.endsWith("/$excluded")
+                }
+            }.forEach { path ->
                 val fileName = path.fileName.toString()
                 if (fileName == "AndroidManifest.xml") {
                     val relativePath = path.toString().substringAfter(rootPath.toString()).replace("\\", "/").removePrefix("/")

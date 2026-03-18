@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
+import kotlin.math.max
 import java.time.LocalDateTime
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -94,20 +95,20 @@ class LangChainAgentService(private val project: Project) {
 
             // 多轮工具调用循环
             var round = 0
-            while (round < MAX_TOOL_ROUNDS && !isCancelled.get()) {
-                round++
-                log("=== 工具调用第 $round 轮 ===")
+                while (round < MAX_TOOL_ROUNDS && !isCancelled.get()) {
+                    round++
+                    log("=== 工具调用第 $round 轮 ===")
 
-                val roundResponse = StringBuilder()
-                val toolCallBuffer = mutableListOf<ToolCall>()
-                val reasoningContentBuffer = StringBuilder()  // DeepSeek 思维内容
-                var lastFinishReason: String? = null
-                var hasSentContentInStream = false  // 标记是否在流中发送过内容
+                    val roundResponse = StringBuilder()
+                    val toolCallBuffer = mutableListOf<ToolCall>()
+                    val reasoningContentBuffer = StringBuilder()  // DeepSeek 思维内容
+                    var lastFinishReason: String? = null
+                    var hasSentContentInStream = false  // 标记是否在流中发送过内容
+                    var toolCallDepth = 0  // 工具调用嵌套层级计数器
 
                 // 流式请求
                 client.chatStream(currentMessages, tools).collect { chunk ->
                     if (isCancelled.get()) return@collect
-
                     when (chunk) {
                         is StreamChunk.Content -> {
                             if (chunk.toolCalls.isNotEmpty()) {
@@ -115,27 +116,72 @@ class LangChainAgentService(private val project: Project) {
                             }
                             // 累积 reasoning_content（DeepSeek 思维模式）
                             if (!chunk.reasoningContent.isNullOrEmpty()) {
-                                reasoningContentBuffer.append(chunk.reasoningContent)
-                                // 实时发送 reasoning_content 到前端
-                                ApplicationManager.getApplication().invokeLater {
-                                    onChunk(chunk.reasoningContent)
+                                val content = chunk.reasoningContent
+                                reasoningContentBuffer.append(content)
+                                
+                                // 检查工具调用标记，更新嵌套层级
+                                val startCount = content.split("<tool_call>").size - 1
+                                val endCount = content.split("</tool_call>").size - 1
+                                
+                                // 打印工具调用检测日志
+                                if (startCount > 0) {
+                                    log("从 reasoning 字段检测到 ${startCount} 个工具调用开始标记")
                                 }
-                                hasSentContentInStream = true
+                                if (endCount > 0) {
+                                    log("从 reasoning 字段检测到 ${endCount} 个工具调用结束标记")
+                                }
+                                
+                                toolCallDepth += startCount
+                                toolCallDepth = max(0, toolCallDepth - endCount)
+                                
+                                // 打印工具调用深度变化
+                                if (startCount > 0 || endCount > 0) {
+                                    log("当前工具调用嵌套深度: $toolCallDepth")
+                                }
+                                
+                                // 只有当不在工具调用块内时，才发送内容
+                                if (toolCallDepth == 0) {
+                                    // 清理可能的工具调用标记
+                                    val cleanChunk = removeDslFromText(content)
+                                    if (cleanChunk.isNotEmpty()) {
+                                        ApplicationManager.getApplication().invokeLater {
+                                            onChunk(cleanChunk)
+                                        }
+                                    }
+                                    hasSentContentInStream = true
+                                }
                             }
                             // 记录 finish_reason（流式中通常在最后一个 chunk 出现）
                             if (chunk.finishReason != null) {
                                 lastFinishReason = chunk.finishReason
                             }
                             if (chunk.content.isNotEmpty()) {
-                                roundResponse.append(chunk.content)
-                                // 实时发送文本内容，包括DSL模式
-                                ApplicationManager.getApplication().invokeLater {
-                                    onChunk(chunk.content)
+                                val content = chunk.content
+                                roundResponse.append(content)
+                                
+                                // 检查工具调用标记，更新嵌套层级
+                                val startCount = content.split("<tool_call>").size - 1
+                                val endCount = content.split("</tool_call>").size - 1
+                                toolCallDepth += startCount
+                                toolCallDepth = max(0, toolCallDepth - endCount)
+                                
+                                // 只有当不在工具调用块内时，才发送内容
+                                if (toolCallDepth == 0) {
+                                    // 清理可能的工具调用标记
+                                    val cleanChunk = removeDslFromText(content)
+                                    if (cleanChunk.isNotEmpty()) {
+                                        ApplicationManager.getApplication().invokeLater {
+                                            onChunk(cleanChunk)
+                                        }
+                                    }
+                                    hasSentContentInStream = true
                                 }
-                                hasSentContentInStream = true
                             }
                         }
-                        is StreamChunk.Done -> { /* 流结束 */ }
+                        is StreamChunk.Done -> { 
+                            // 流结束，重置工具调用深度
+                            toolCallDepth = 0
+                        }
                     }
                 }
 
@@ -155,6 +201,10 @@ class LangChainAgentService(private val project: Project) {
                     if (dslToolCalls.isNotEmpty()) {
                         log("从 reasoning 解析到 ${dslToolCalls.size} 个 DSL 工具调用")
                         resolvedToolCalls = dslToolCalls
+                        // 清理 reasoningContent 中的工具调用标记
+                        val cleanReasoning = removeDslFromText(reasoningText)
+                        reasoningContentBuffer.clear()
+                        reasoningContentBuffer.append(cleanReasoning)
                     } else {
                         // 如果 reasoning 中没有，再从 response 中解析
                         dslToolCalls = parseDslToolCalls(responseText)
@@ -394,11 +444,15 @@ class LangChainAgentService(private val project: Project) {
 
         // 如果 DSML 格式没解析到，尝试 <tool_call> 格式（部分模型可能生成）
         if (toolCalls.isEmpty()) {
-            val toolCallRegex = """<tool_call>\s*(?:<tool_name>(\w+)</tool_name>|<(\w+)>)\s*([\s\S]*?)(?:</tool_call>|$)""".toRegex()
+            // 支持多种格式：
+            // 1. <tool_call><tool_name>name</tool_name>...</tool_call>
+            // 2. <tool_call><function=name>...</function></tool_call>
+            // 3. <tool_call><name>...</tool_call>
+            val toolCallRegex = """<tool_call>\s*(?:(?:<tool_name>(\w+)</tool_name>)|(?:<function=(\w+)>)|(?:<(\w+)>))\s*([\s\S]*?)(?:</tool_call>|$)""".toRegex()
             toolCallRegex.findAll(text).forEachIndexed { index, match ->
-                val toolName = match.groupValues[1].ifEmpty { match.groupValues[2] }
+                val toolName = match.groupValues[1].ifEmpty { match.groupValues[2] }.ifEmpty { match.groupValues[3] }
                 if (toolName.isNotEmpty()) {
-                    val paramsText = match.groupValues[3]
+                    val paramsText = match.groupValues[4]
                     val argsMap = extractXmlParams(paramsText)
                     log("解析 tool_call 格式: name=$toolName, args=$argsMap")
 
@@ -440,14 +494,27 @@ class LangChainAgentService(private val project: Project) {
      */
     private fun extractXmlParams(text: String): Map<String, Any> {
         val params = mutableMapOf<String, Any>()
-        val paramRegex = """<(\w+)>(.*?)</\w+>""".toRegex()
-        paramRegex.findAll(text).forEach { match ->
+        
+        // 支持格式1: <name>value</name>
+        val paramRegex1 = """<(\w+)>(.*?)</\w+>""".toRegex()
+        paramRegex1.findAll(text).forEach { match ->
             val key = match.groupValues[1]
             val value = match.groupValues[2].trim()
-            if (key != "tool_name" && key != "parameters" && key != "tool_call") {
+            if (key != "tool_name" && key != "parameters" && key != "tool_call" && key != "parameter" && key != "function") {
                 params[key] = value
             }
         }
+        
+        // 支持格式2: <parameter=name>value</parameter> (Qwen格式)
+        // 使用 [\s\S] 匹配包括换行符在内的所有字符
+        val paramRegex2 = """<parameter=(\w+)>\s*([\s\S]*?)\s*</parameter>""".toRegex()
+        paramRegex2.findAll(text).forEach { match ->
+            val key = match.groupValues[1]
+            val value = match.groupValues[2].trim()
+            params[key] = value
+            log("提取参数: $key = $value")
+        }
+        
         return params
     }
 
@@ -479,8 +546,10 @@ class LangChainAgentService(private val project: Project) {
     private fun removeDslFromText(text: String): String {
         // 移除 DSML 格式（兼容全角/半角竖线）
         var result = text.replace("""<[｜|]\s*DSML\s*[｜|]\s*function_calls\s*>[\s\S]*?</[｜|]\s*DSML\s*[｜|]\s*function_calls\s*>""".toRegex(), "")
-        // 移除 tool_call 格式
+        // 移除 tool_call 格式（支持多行，[\s\S] 已经匹配所有字符包括换行）
         result = result.replace("""<tool_call>[\s\S]*?</tool_call>""".toRegex(), "")
+        // 清理多余的空行
+        result = result.replace("""\n{3,}""".toRegex(), "\n\n")
         return result.trim()
     }
 
@@ -525,12 +594,15 @@ class LangChainAgentService(private val project: Project) {
         val toolCallId = toolCall.id
 
         log("执行工具: $toolName")
+        log("工具参数JSON: $argumentsJson")
 
         val params: Map<String, Any> = try {
             OpenAiClient.objectMapper.readValue(argumentsJson, Map::class.java) as Map<String, Any>
         } catch (e: Exception) {
+            log("解析工具参数失败: ${e.message}")
             emptyMap()
         }
+        log("解析后的参数: $params")
 
         // 通知 UI 开始
         notifyToolCallUI(onToolCall, toolCallId, toolName, params, isExecuting = true)
