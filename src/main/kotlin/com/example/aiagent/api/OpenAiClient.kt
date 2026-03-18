@@ -223,7 +223,7 @@ class OpenAiClient(
 
             StreamChunk.Content(
                 content = delta.content ?: "",
-                reasoningContent = delta.reasoningContent,
+                reasoningContent = delta.reasoning ?: delta.reasoningContent,
                 finishReason = choice.finishReason,
                 toolCalls = delta.toolCalls?.map { tc ->
                     // 流式模式下 tool call 分多个 delta 到达：
@@ -432,6 +432,7 @@ class OpenAiClient(
     private data class StreamDelta(
         val role: String? = null,
         val content: String? = null,
+        @JsonProperty("reasoning") val reasoning: String? = null,
         @JsonProperty("reasoning_content") val reasoningContent: String? = null,
         @JsonProperty("tool_calls") val toolCalls: List<ApiToolCall>? = null
     )

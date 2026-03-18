@@ -116,6 +116,11 @@ class LangChainAgentService(private val project: Project) {
                             // 累积 reasoning_content（DeepSeek 思维模式）
                             if (!chunk.reasoningContent.isNullOrEmpty()) {
                                 reasoningContentBuffer.append(chunk.reasoningContent)
+                                // 实时发送 reasoning_content 到前端
+                                ApplicationManager.getApplication().invokeLater {
+                                    onChunk(chunk.reasoningContent)
+                                }
+                                hasSentContentInStream = true
                             }
                             // 记录 finish_reason（流式中通常在最后一个 chunk 出现）
                             if (chunk.finishReason != null) {
@@ -194,6 +199,13 @@ class LangChainAgentService(private val project: Project) {
                             when (chunk) {
                                 is StreamChunk.Content -> {
                                     if (chunk.finishReason != null) contFinishReason = chunk.finishReason
+                                    // 处理 reasoning_content
+                                    if (!chunk.reasoningContent.isNullOrEmpty()) {
+                                        contResponse.append(chunk.reasoningContent)
+                                        ApplicationManager.getApplication().invokeLater {
+                                            onChunk(chunk.reasoningContent)
+                                        }
+                                    }
                                     if (chunk.content.isNotEmpty()) {
                                         contResponse.append(chunk.content)
                                         ApplicationManager.getApplication().invokeLater {
