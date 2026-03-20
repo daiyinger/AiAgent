@@ -94,7 +94,11 @@ class ReadFileTool : Tool(
                 emptyList()
             }
             
-            val selectedContent = selectedLines.joinToString("\n")
+            // 生成带行号的内容
+            val selectedContent = selectedLines.mapIndexed { index, line ->
+                val actualLineNumber = actualStartLine + index
+                "$actualLineNumber. $line"
+            }.joinToString("\n")
             val actualReadLineCount = selectedLines.size
 
             ToolResult.Success(

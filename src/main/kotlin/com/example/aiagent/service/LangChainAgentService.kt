@@ -31,7 +31,7 @@ class LangChainAgentService(private val project: Project) {
         /** 单条消息最大字符数 */
         private const val MAX_MESSAGE_LENGTH = 10240
         /** 工具结果截断长度 */
-        private const val MAX_TOOL_RESULT_LENGTH = 6000
+        private const val MAX_TOOL_RESULT_LENGTH = 10240
     }
 
     private fun log(message: String) = LogService.log(message)

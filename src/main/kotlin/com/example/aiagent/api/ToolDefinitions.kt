@@ -9,7 +9,7 @@ import com.example.aiagent.tools.ToolManager
 object ToolDefinitions {
 
     /** 工具结果截断阈值：超过此长度的结果会被截断 */
-    private const val MAX_TOOL_RESULT_LENGTH = 8000
+    private const val MAX_TOOL_RESULT_LENGTH = 10240
 
     /**
      * 获取所有可用工具的定义（OpenAI Function Calling schema）
