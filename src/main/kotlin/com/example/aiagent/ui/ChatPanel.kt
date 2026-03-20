@@ -698,12 +698,15 @@ fun ChatPanel() {
                                 if (langChainService != null) {
                                     CoroutineScope(Dispatchers.IO).launch {
                                         var currentContent = ""
+                                        var currentReasoningContent = ""
                                         var isGenerating = true
                                         var currentAiMessageId = aiMessageId
                                         var shouldCreateNewAiMessage = false
                                         val messageContents = mutableMapOf<String, String>()
+                                        val reasoningContents = mutableMapOf<String, String>()
                                         // 保存初始消息的初始空内容
                                         messageContents[aiMessageId] = currentContent
+                                        reasoningContents[aiMessageId] = currentReasoningContent
                                         
                                         val result = langChainService.sendMessage(
                                             message = originalInput,
@@ -738,8 +741,10 @@ fun ChatPanel() {
                                                         // 更新当前消息 ID 和内容
                                                         currentAiMessageId = newAiMessageId
                                                         currentContent = ""
+                                                        currentReasoningContent = ""
                                                         // 保存新消息的初始空内容
                                                         messageContents[currentAiMessageId] = currentContent
+                                                        reasoningContents[currentAiMessageId] = currentReasoningContent
                                                         shouldCreateNewAiMessage = false
                                                         
                                                         // 现在添加新的 chunk
@@ -754,8 +759,6 @@ fun ChatPanel() {
                                                             )
                                                             newMessages[aiMessageIndex] = updatedMessage
                                                             messages.value = newMessages
-                                                            // 打印所有chunk
-                                                            //log("收到 LangChain4j 消息 chunk: $chunk")
                                                         }
                                                     }
                                                 } else {
@@ -773,8 +776,75 @@ fun ChatPanel() {
                                                             )
                                                             newMessages[aiMessageIndex] = updatedMessage
                                                             messages.value = newMessages
-                                                            // 打印所有chunk
-                                                            //log("收到 LangChain4j 消息 chunk: $chunk")
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            onReasoningChunk = { chunk ->
+                                                // 检查是否已取消
+                                                if (langChainService?.isCancelled() == true) {
+                                                    log("已取消，跳过处理 reasoning chunk")
+                                                    return@sendMessage
+                                                }
+                                                isGenerating = true
+                                                
+                                                // 如果需要创建新的 AI 消息块，先创建
+                                                if (shouldCreateNewAiMessage) {
+                                                    CoroutineScope(Dispatchers.Main).launch {
+                                                        val newMessages = messages.value.toMutableList()
+                                                        val newAiMessageId = (System.currentTimeMillis() + 1).toString()
+                                                        val newAiMessageTimestamp = LocalDateTime.now()
+                                                        val newAiMessage = AiMessage(
+                                                            id = newAiMessageId,
+                                                            content = "",
+                                                            timestamp = newAiMessageTimestamp,
+                                                            isGenerating = false, // 中间的消息不显示生成中状态
+                                                            modelName = settings.currentModel
+                                                        )
+                                                        // 简单地添加到消息列表末尾
+                                                        val insertPosition = newMessages.size
+                                                        newMessages.add(insertPosition, newAiMessage)
+                                                        messages.value = newMessages
+                                                        chatStateService.addMessageToCurrentSessionAtPosition(newAiMessage.toMessageState(), insertPosition)
+                                                        log("创建新的 AI 消息块：$newAiMessageId, 插入位置: $insertPosition")
+                                                        // 更新当前消息 ID 和内容
+                                                        currentAiMessageId = newAiMessageId
+                                                        currentContent = ""
+                                                        currentReasoningContent = ""
+                                                        // 保存新消息的初始空内容
+                                                        messageContents[currentAiMessageId] = currentContent
+                                                        reasoningContents[currentAiMessageId] = currentReasoningContent
+                                                        shouldCreateNewAiMessage = false
+                                                        
+                                                        // 现在添加新的 reasoning chunk
+                                                        currentReasoningContent += chunk
+                                                        reasoningContents[currentAiMessageId] = currentReasoningContent
+                                                        
+                                                        val aiMessageIndex = newMessages.indexOfFirst { it is AiMessage && it.id == currentAiMessageId }
+                                                        if (aiMessageIndex >= 0) {
+                                                            val existingMessage = newMessages[aiMessageIndex] as AiMessage
+                                                            val updatedMessage = existingMessage.copy(
+                                                                reasoningContent = currentReasoningContent
+                                                            )
+                                                            newMessages[aiMessageIndex] = updatedMessage
+                                                            messages.value = newMessages
+                                                        }
+                                                    }
+                                                } else {
+                                                    currentReasoningContent += chunk
+                                                    // 保存当前消息的 reasoning 内容
+                                                    reasoningContents[currentAiMessageId] = currentReasoningContent
+                                                    // 实时更新 AI 消息的 reasoning 内容
+                                                    CoroutineScope(Dispatchers.Main).launch {
+                                                        val newMessages = messages.value.toMutableList()
+                                                        val aiMessageIndex = newMessages.indexOfFirst { it is AiMessage && it.id == currentAiMessageId }
+                                                        if (aiMessageIndex >= 0) {
+                                                            val existingMessage = newMessages[aiMessageIndex] as AiMessage
+                                                            val updatedMessage = existingMessage.copy(
+                                                                reasoningContent = currentReasoningContent
+                                                            )
+                                                            newMessages[aiMessageIndex] = updatedMessage
+                                                            messages.value = newMessages
                                                         }
                                                     }
                                                 }
@@ -789,6 +859,7 @@ fun ChatPanel() {
                                                             val aiMessage = newMessages[i] as AiMessage
                                                             // 只有当messageContents中存在该消息的内容时才更新，否则保持原有内容
                                                             val savedContent = messageContents[aiMessage.id] ?: aiMessage.content
+                                                            val savedReasoningContent = reasoningContents[aiMessage.id] ?: aiMessage.reasoningContent
                                                             // 最后一个消息（总结消息）才设置token统计
                                                             val shouldHaveTokenUsage = i == newMessages.indexOfLast { it is AiMessage }
                                                             val updatedMessage = AiMessage(
@@ -797,7 +868,8 @@ fun ChatPanel() {
                                                                 timestamp = aiMessage.timestamp,
                                                                 isGenerating = false,
                                                                 tokenUsage = if (shouldHaveTokenUsage) tokenUsage else aiMessage.tokenUsage,
-                                                                modelName = settings.currentModel
+                                                                modelName = settings.currentModel,
+                                                                reasoningContent = savedReasoningContent
                                                             )
                                                             newMessages[i] = updatedMessage
                                                         }
@@ -808,6 +880,9 @@ fun ChatPanel() {
                                                     for ((msgId, content) in messageContents) {
                                                         chatStateService.updateMessageContent(msgId, content)
                                                     }
+                                                    for ((msgId, reasoningContent) in reasoningContents) {
+                                                        chatStateService.updateMessageReasoningContent(msgId, reasoningContent)
+                                                    }
                                                     
                                                     // 确保所有AI消息的内容都被保存到ChatStateService
                                                     for (message in newMessages) {
@@ -815,6 +890,9 @@ fun ChatPanel() {
                                                             // 只有当messageContents中不存在时才需要更新，避免覆盖
                                                             if (!messageContents.containsKey(message.id)) {
                                                                 chatStateService.updateMessageContent(message.id, message.content)
+                                                            }
+                                                            if (!reasoningContents.containsKey(message.id)) {
+                                                                chatStateService.updateMessageReasoningContent(message.id, message.reasoningContent)
                                                             }
                                                         }
                                                     }
@@ -1359,6 +1437,18 @@ private fun AiMessageItem(message: AiMessage) {
                 .background(Color(0xFF2D2D2D), RoundedCornerShape(12.dp))
                 .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
         ) {
+            // 显示思考内容（浅灰色）
+            if (message.reasoningContent.isNotEmpty()) {
+                SelectionContainer {
+                    Text(
+                        text = message.reasoningContent,
+                        style = JewelTheme.defaultTextStyle.copy(color = Color(0xFFBBBBBB)),
+                        softWrap = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             SelectionContainer {
                 Text(
                     text = message.content,
@@ -2217,7 +2307,8 @@ data class AiMessage(
     override val timestamp: LocalDateTime,
     var isGenerating: Boolean = false,
     var tokenUsage: Pair<Int, Int>? = null,
-    var modelName: String? = null
+    var modelName: String? = null,
+    var reasoningContent: String = ""
 ) : ChatMessage(id, content, timestamp)
 
 // 工具调用消息
@@ -2243,7 +2334,7 @@ fun ChatStateService.MessageState.toChatMessage(): ChatMessage {
     val dateTime = if (timestamp.isNotEmpty()) timestamp.toLocalDateTime() else LocalDateTime.now()
     return when (type) {
         "user" -> UserMessage(id, content, dateTime)
-        "ai" -> AiMessage(id, content, dateTime, isGenerating, if (inputTokens > 0 || outputTokens > 0) Pair(inputTokens, outputTokens) else null, modelName)
+        "ai" -> AiMessage(id, content, dateTime, isGenerating, if (inputTokens > 0 || outputTokens > 0) Pair(inputTokens, outputTokens) else null, modelName, reasoningContent)
         "tool" -> ToolCallMessage(
             id = id,
             toolName = toolName,
@@ -2281,7 +2372,8 @@ fun ChatMessage.toMessageState(): ChatStateService.MessageState {
             inputTokens = tokenUsage?.first ?: 0,
             outputTokens = tokenUsage?.second ?: 0,
             totalTokens = (tokenUsage?.first ?: 0) + (tokenUsage?.second ?: 0),
-            modelName = modelName
+            modelName = modelName,
+            reasoningContent = reasoningContent
         )
         is ToolCallMessage -> ChatStateService.MessageState(
             id = id,

@@ -34,7 +34,8 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
         var inputTokens: Int = 0,
         var outputTokens: Int = 0,
         var totalTokens: Int = 0,
-        var modelName: String? = null
+        var modelName: String? = null,
+        var reasoningContent: String = ""
     )
     
     data class State(
@@ -179,6 +180,16 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
             val msgIndex = currentSessionState.messages.indexOfFirst { it.id == messageId && it.type == "ai" }
             if (msgIndex >= 0) {
                 currentSessionState.messages[msgIndex].content = content
+            }
+        }
+    }
+    
+    fun updateMessageReasoningContent(messageId: String, reasoningContent: String) {
+        val currentSessionState = currentSession
+        if (currentSessionState != null) {
+            val msgIndex = currentSessionState.messages.indexOfFirst { it.id == messageId && it.type == "ai" }
+            if (msgIndex >= 0) {
+                currentSessionState.messages[msgIndex].reasoningContent = reasoningContent
             }
         }
     }

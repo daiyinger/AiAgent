@@ -54,6 +54,18 @@ class EditFileTool : Tool(
         log("参数: newText长度=${newText.length}, 前50字符=${newText.take(50)}")
         log("参数: startLine=${startLine}, endLine=${endLine}")
 
+        // 验证行号参数
+        if (startLine != null && endLine != null) {
+            if (startLine < 1) {
+                log("错误: startLine必须大于0, 实际值=$startLine")
+                return ToolResult.Error("Invalid start_line: must be greater than 0, got $startLine")
+            }
+            if (endLine < startLine) {
+                log("错误: endLine必须大于或等于startLine, 实际值=$endLine")
+                return ToolResult.Error("Invalid end_line: must be greater than or equal to start_line, got $endLine")
+            }
+        }
+
         return try {
             val resolvedPath = resolveFilePath(project, path)
                 ?: return ToolResult.Error("Project base path not found")

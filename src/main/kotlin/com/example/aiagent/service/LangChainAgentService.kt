@@ -60,6 +60,7 @@ class LangChainAgentService(private val project: Project) {
     suspend fun sendMessage(
         message: String,
         onChunk: (String) -> Unit,
+        onReasoningChunk: (String) -> Unit,
         onToolCall: (ToolCallMessage) -> Unit,
         onComplete: () -> Unit = {},
         onTokenUsage: (Int, Int) -> Unit = { _, _ -> },
@@ -105,6 +106,10 @@ class LangChainAgentService(private val project: Project) {
                     var lastFinishReason: String? = null
                     var hasSentContentInStream = false  // 标记是否在流中发送过内容
                     var toolCallDepth = 0  // 工具调用嵌套层级计数器
+                    
+                    // 工具调用标记检测器，用于处理跨chunk的标签
+                    val reasoningTagDetector = ToolCallTagDetector()
+                    val contentTagDetector = ToolCallTagDetector()
 
                 // 流式请求
                 client.chatStream(currentMessages, tools).collect { chunk ->
@@ -119,7 +124,10 @@ class LangChainAgentService(private val project: Project) {
                                 val content = chunk.reasoningContent
                                 reasoningContentBuffer.append(content)
                                 
-                                // 检查工具调用标记，更新嵌套层级
+                                // 使用TagDetector处理跨chunk的标签检测
+                                val (displayContent, inTag) = reasoningTagDetector.process(content)
+                                
+                                // 检查工具调用标记，更新嵌套层级（用于兼容原有逻辑）
                                 val startCount = content.split("<tool_call>").size - 1
                                 val endCount = content.split("</tool_call>").size - 1
                                 
@@ -141,11 +149,10 @@ class LangChainAgentService(private val project: Project) {
                                 
                                 // 只有当不在工具调用块内时，才发送内容
                                 if (toolCallDepth == 0) {
-                                    // 清理可能的工具调用标记
-                                    val cleanChunk = removeDslFromText(content)
-                                    if (cleanChunk.isNotEmpty()) {
+                                    // 使用TagDetector处理后的内容
+                                    if (displayContent.isNotEmpty()) {
                                         ApplicationManager.getApplication().invokeLater {
-                                            onChunk(cleanChunk)
+                                            onReasoningChunk(displayContent)
                                         }
                                     }
                                     hasSentContentInStream = true
@@ -159,7 +166,10 @@ class LangChainAgentService(private val project: Project) {
                                 val content = chunk.content
                                 roundResponse.append(content)
                                 
-                                // 检查工具调用标记，更新嵌套层级
+                                // 使用TagDetector处理跨chunk的标签检测
+                                val (displayContent, inTag) = contentTagDetector.process(content)
+                                
+                                // 检查工具调用标记，更新嵌套层级（用于兼容原有逻辑）
                                 val startCount = content.split("<tool_call>").size - 1
                                 val endCount = content.split("</tool_call>").size - 1
                                 toolCallDepth += startCount
@@ -167,11 +177,10 @@ class LangChainAgentService(private val project: Project) {
                                 
                                 // 只有当不在工具调用块内时，才发送内容
                                 if (toolCallDepth == 0) {
-                                    // 清理可能的工具调用标记
-                                    val cleanChunk = removeDslFromText(content)
-                                    if (cleanChunk.isNotEmpty()) {
+                                    // 使用TagDetector处理后的内容
+                                    if (displayContent.isNotEmpty()) {
                                         ApplicationManager.getApplication().invokeLater {
-                                            onChunk(cleanChunk)
+                                            onChunk(displayContent)
                                         }
                                     }
                                     hasSentContentInStream = true
@@ -179,7 +188,20 @@ class LangChainAgentService(private val project: Project) {
                             }
                         }
                         is StreamChunk.Done -> { 
-                            // 流结束，重置工具调用深度
+                            // 流结束，刷新检测器，输出剩余内容
+                            val remainingReasoning = reasoningTagDetector.flush()
+                            if (remainingReasoning.isNotEmpty()) {
+                                ApplicationManager.getApplication().invokeLater {
+                                    onReasoningChunk(remainingReasoning)
+                                }
+                            }
+                            val remainingContent = contentTagDetector.flush()
+                            if (remainingContent.isNotEmpty()) {
+                                ApplicationManager.getApplication().invokeLater {
+                                    onChunk(remainingContent)
+                                }
+                            }
+                            // 重置工具调用深度
                             toolCallDepth = 0
                         }
                     }
@@ -253,6 +275,10 @@ class LangChainAgentService(private val project: Project) {
 
                         val contResponse = StringBuilder()
                         var contFinishReason: String? = null
+                        
+                        // 续传时也使用TagDetector处理跨chunk的标签
+                        val contReasoningDetector = ToolCallTagDetector()
+                        val contContentDetector = ToolCallTagDetector()
 
                         client.chatStream(currentMessages, tools).collect { chunk ->
                             if (isCancelled.get()) return@collect
@@ -262,18 +288,38 @@ class LangChainAgentService(private val project: Project) {
                                     // 处理 reasoning_content
                                     if (!chunk.reasoningContent.isNullOrEmpty()) {
                                         contResponse.append(chunk.reasoningContent)
-                                        ApplicationManager.getApplication().invokeLater {
-                                            onChunk(chunk.reasoningContent)
+                                        val (displayContent, _) = contReasoningDetector.process(chunk.reasoningContent)
+                                        if (displayContent.isNotEmpty()) {
+                                            ApplicationManager.getApplication().invokeLater {
+                                                onReasoningChunk(displayContent)
+                                            }
                                         }
                                     }
                                     if (chunk.content.isNotEmpty()) {
                                         contResponse.append(chunk.content)
-                                        ApplicationManager.getApplication().invokeLater {
-                                            onChunk(chunk.content)
+                                        val (displayContent, _) = contContentDetector.process(chunk.content)
+                                        if (displayContent.isNotEmpty()) {
+                                            ApplicationManager.getApplication().invokeLater {
+                                                onChunk(displayContent)
+                                            }
                                         }
                                     }
                                 }
-                                is StreamChunk.Done -> {}
+                                is StreamChunk.Done -> {
+                                    // 刷新检测器，输出剩余内容
+                                    val remainingReasoning = contReasoningDetector.flush()
+                                    if (remainingReasoning.isNotEmpty()) {
+                                        ApplicationManager.getApplication().invokeLater {
+                                            onReasoningChunk(remainingReasoning)
+                                        }
+                                    }
+                                    val remainingContent = contContentDetector.flush()
+                                    if (remainingContent.isNotEmpty()) {
+                                        ApplicationManager.getApplication().invokeLater {
+                                            onChunk(remainingContent)
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -541,6 +587,134 @@ class LangChainAgentService(private val project: Project) {
     }
 
     /**
+     * 工具调用标记检测器
+     * 用于处理跨chunk的工具调用标记检测
+     * 状态机：检测 <tool_call> 和 </tool_call> 标签
+     */
+    private class ToolCallTagDetector {
+        private val buffer = StringBuilder()
+        private var state = DetectionState.NORMAL
+        
+        enum class DetectionState {
+            NORMAL,           // 正常状态
+            MAYBE_START_TAG,  // 可能开始标签（检测到 '<'）
+            IN_START_TAG,     // 在开始标签内（<tool_call...）
+            MAYBE_END_TAG,    // 可能结束标签（检测到 '</'）
+            IN_END_TAG        // 在结束标签内（</tool_call...）
+        }
+        
+        private val START_TAG = "<tool_call"
+        private val END_TAG = "</tool_call>"
+        
+        /**
+         * 处理输入文本，返回可以安全显示的内容和需要缓冲的内容
+         * @return Pair<可显示内容, 是否处于标签内>
+         */
+        fun process(text: String): Pair<String, Boolean> {
+            val displayBuffer = StringBuilder()
+            var i = 0
+            
+            while (i < text.length) {
+                val char = text[i]
+                
+                when (state) {
+                    DetectionState.NORMAL -> {
+                        if (char == '<') {
+                            // 可能开始标签，进入缓冲状态
+                            buffer.clear()
+                            buffer.append(char)
+                            state = DetectionState.MAYBE_START_TAG
+                        } else {
+                            displayBuffer.append(char)
+                        }
+                    }
+                    
+                    DetectionState.MAYBE_START_TAG -> {
+                        buffer.append(char)
+                        if (char == '/') {
+                            // 可能是结束标签 </...
+                            state = DetectionState.MAYBE_END_TAG
+                        } else if (buffer.toString() == START_TAG.take(buffer.length)) {
+                            // 匹配开始标签
+                            if (buffer.length == START_TAG.length) {
+                                // 完整匹配 <tool_call
+                                state = DetectionState.IN_START_TAG
+                            }
+                            // 否则继续匹配
+                        } else {
+                            // 不匹配，输出缓冲的内容
+                            displayBuffer.append(buffer)
+                            buffer.clear()
+                            state = DetectionState.NORMAL
+                        }
+                    }
+                    
+                    DetectionState.MAYBE_END_TAG -> {
+                        buffer.append(char)
+                        val current = buffer.toString()
+                        if (current == END_TAG.take(current.length)) {
+                            if (current.length == END_TAG.length) {
+                                // 完整匹配 </tool_call>
+                                buffer.clear() // 丢弃标签
+                                state = DetectionState.NORMAL
+                            }
+                            // 否则继续匹配
+                        } else {
+                            // 不匹配，输出缓冲的内容
+                            displayBuffer.append(buffer)
+                            buffer.clear()
+                            state = DetectionState.NORMAL
+                        }
+                    }
+                    
+                    DetectionState.IN_START_TAG -> {
+                        buffer.append(char)
+                        if (char == '>') {
+                            // 开始标签结束 <tool_call...>
+                            buffer.clear() // 丢弃标签
+                            state = DetectionState.NORMAL
+                        }
+                        // 否则继续等待标签结束
+                    }
+                    
+                    DetectionState.IN_END_TAG -> {
+                        // 这个状态实际上不会进入，因为在MAYBE_END_TAG中已经处理了
+                        buffer.append(char)
+                    }
+                }
+                
+                i++
+            }
+            
+            // 检查是否处于可能的状态，如果是则保留缓冲
+            val inTag = state != DetectionState.NORMAL
+            
+            // 如果不在标签检测状态，但有缓冲内容，应该输出
+            if (!inTag && buffer.isNotEmpty()) {
+                displayBuffer.append(buffer)
+                buffer.clear()
+            }
+            
+            return Pair(displayBuffer.toString(), inTag)
+        }
+        
+        /**
+         * 重置状态，返回缓冲的内容
+         */
+        fun flush(): String {
+            val remaining = buffer.toString()
+            buffer.clear()
+            state = DetectionState.NORMAL
+            return remaining
+        }
+        
+        /**
+         * 检查是否处于标签检测状态
+         */
+        fun isInTag(): Boolean = state != DetectionState.NORMAL
+    }
+
+    /**
      * 从文本中移除 DSL 标记，保留纯文本
      */
     private fun removeDslFromText(text: String): String {
@@ -702,12 +876,24 @@ class LangChainAgentService(private val project: Project) {
         val settings = AiAgentSettings.instance.state
         val modelName = settings.currentModel
 
+        // 检测是否为编程模式
+        val isProgrammingMode = currentMessage.contains("code") || 
+                               currentMessage.contains("编程") ||
+                               currentMessage.contains("代码") ||
+                               currentMessage.contains("function") ||
+                               currentMessage.contains("class") ||
+                               currentMessage.contains("文件") ||
+                               currentMessage.contains("编译") ||
+                               currentMessage.contains("优化") ||
+                               currentMessage.contains("完善")
+
         // 使用TokenOptimizer智能选择历史消息
         val selectedHistory = TokenOptimizer.selectHistoryMessages(
             history = history,
             currentMessage = currentMessage,
             modelName = modelName,
-            maxHistoryMessages = MAX_HISTORY_MESSAGES
+            maxHistoryMessages = MAX_HISTORY_MESSAGES,
+            isProgrammingMode = isProgrammingMode
         )
 
         // 计算token统计
@@ -746,6 +932,9 @@ class LangChainAgentService(private val project: Project) {
     private fun buildOptimizedSystemPrompt(embedToolsInPrompt: Boolean = false): String {
         if (!embedToolsInPrompt) {
             // FC 模式：工具定义已通过 API 传递
+            val allTools = ToolDefinitions.getAllTools()
+            val toolNames = allTools.joinToString(", ") { it.function.name }
+            
             return """
                 你是 Android Studio 专家，擅长分析和修改项目。
 
@@ -756,7 +945,7 @@ class LangChainAgentService(private val project: Project) {
                 4. 路径用相对路径，修改文件前先读取内容
                 5. 不要说"我来帮你..."或"让我先..."这样的过渡语句，直接行动
 
-                可用工具: list_files, read_file, edit_file, search_files, analyze_project, compile_project
+                可用工具: $toolNames
                 编译建议: assemble(快速) > build(完整) > clean(清理后重新)
             """.trimIndent()
         }

@@ -1,5 +1,6 @@
 package com.example.aiagent.service
 
+import com.example.aiagent.settings.AiAgentSettings
 import com.knuddels.jtokkit.Encodings
 import com.knuddels.jtokkit.api.Encoding
 import com.knuddels.jtokkit.api.EncodingRegistry
@@ -21,12 +22,24 @@ object TokenOptimizer {
         "gpt-3.5-turbo" to 16385,
         "deepseek-chat" to 64000,
         "deepseek-coder" to 64000,
-        "qwen" to 32000,
-        "default" to 8192
+        "qwen" to 32000
     )
 
     // 为历史会话保留的token比例
     private const val HISTORY_TOKEN_RATIO = 0.6
+    
+    // 编程模式下为历史会话保留的token比例（更高）
+    private const val PROGRAMMING_HISTORY_TOKEN_RATIO = 0.7
+
+    // 重要的编程相关工具
+    private val IMPORTANT_PROGRAMMING_TOOLS = setOf(
+        "read_file",
+        "edit_file",
+        "compile_project",
+        "analyze_project",
+        "search_files",
+        "list_files"
+    )
 
     /**
      * 获取指定模型的encoding
@@ -65,21 +78,29 @@ object TokenOptimizer {
 
     /**
      * 获取模型的token限制
+     * 优先使用模型特定的限制，否则使用设置中的上下文长度
      */
     fun getModelTokenLimit(modelName: String): Int {
-        return modelTokenLimits.entries.find { (key, _) ->
+        // 先尝试匹配模型特定的限制
+        modelTokenLimits.entries.find { (key, _) ->
             modelName.contains(key, ignoreCase = true)
-        }?.value ?: modelTokenLimits["default"]!!
+        }?.let { return it.value }
+        
+        // 使用设置中的上下文长度，默认为8192
+        val settings = AiAgentSettings.instance.state
+        val currentProvider = settings.providers.find { it.id == settings.currentProviderId } ?: settings.providers.firstOrNull()
+        return currentProvider?.contextLength ?: 8192
     }
 
     /**
      * 计算可用于历史会话的token数量
      */
-    fun getAvailableHistoryTokens(modelName: String, currentMessageTokens: Int): Int {
+    fun getAvailableHistoryTokens(modelName: String, currentMessageTokens: Int, isProgrammingMode: Boolean = false): Int {
         val totalLimit = getModelTokenLimit(modelName)
         val systemPromptTokens = 500 // 预估系统提示的token数
         val responseReserve = 2000   // 为响应预留的token数
-        val availableForHistory = (totalLimit * HISTORY_TOKEN_RATIO).toInt()
+        val historyRatio = if (isProgrammingMode) PROGRAMMING_HISTORY_TOKEN_RATIO else HISTORY_TOKEN_RATIO
+        val availableForHistory = (totalLimit * historyRatio).toInt()
 
         return availableForHistory - systemPromptTokens - currentMessageTokens
     }
@@ -116,17 +137,30 @@ object TokenOptimizer {
         history: List<ChatStateService.MessageState>,
         currentMessage: String,
         modelName: String,
-        maxHistoryMessages: Int = 20
+        maxHistoryMessages: Int = 20,
+        isProgrammingMode: Boolean = false
     ): List<ChatStateService.MessageState> {
         if (history.isEmpty()) return emptyList()
 
         val currentMessageTokens = countTokens(currentMessage, modelName)
-        val availableTokens = getAvailableHistoryTokens(modelName, currentMessageTokens)
+        val availableTokens = getAvailableHistoryTokens(modelName, currentMessageTokens, isProgrammingMode)
 
         // 过滤有效消息并按时间排序
-        val validHistory = history
-            .filter { it.type in listOf("user", "ai") && it.content.isNotEmpty() }
-            .sortedBy { it.timestamp }
+        val validHistory = if (isProgrammingMode) {
+            // 编程模式：保留用户、AI消息和重要的工具结果
+            history
+                .filter { 
+                    (it.type in listOf("user", "ai") ||
+                     (it.type == "tool" && it.toolName in IMPORTANT_PROGRAMMING_TOOLS)) && 
+                    it.content.isNotEmpty() 
+                }
+                .sortedBy { it.timestamp }
+        } else {
+            // 普通模式：只保留用户和AI消息
+            history
+                .filter { it.type in listOf("user", "ai") && it.content.isNotEmpty() }
+                .sortedBy { it.timestamp }
+        }
 
         if (validHistory.isEmpty()) return emptyList()
 
@@ -218,6 +252,60 @@ object TokenOptimizer {
         }
 
         return summary + "\n... [已摘要，原${sentences.size}句]"
+    }
+
+    /**
+     * 代码文本摘要
+     * 保留函数签名、类定义等重要部分
+     */
+    fun summarizeCode(text: String, maxLines: Int = 20): String {
+        if (text.isEmpty()) return text
+
+        val lines = text.lines().filter { it.isNotBlank() }
+        if (lines.size <= maxLines) return text
+
+        // 优先保留函数定义、类定义、import语句等
+        val importantLines = mutableListOf<String>()
+        val regularLines = mutableListOf<String>()
+
+        for (line in lines) {
+            val trimmed = line.trim()
+            if (trimmed.startsWith("import ") ||
+                trimmed.startsWith("package ") ||
+                trimmed.startsWith("class ") ||
+                trimmed.startsWith("interface ") ||
+                trimmed.startsWith("fun ") ||
+                trimmed.startsWith("val ") ||
+                trimmed.startsWith("var ") ||
+                trimmed.startsWith("if (") ||
+                trimmed.startsWith("for (") ||
+                trimmed.startsWith("while (") ||
+                trimmed.startsWith("switch (") ||
+                trimmed.startsWith("case ") ||
+                trimmed.startsWith("default:") ||
+                trimmed.startsWith("return ") ||
+                trimmed.startsWith("throw ") ||
+                trimmed.endsWith(" {") ||
+                trimmed == "}") {
+                importantLines.add(line)
+            } else {
+                regularLines.add(line)
+            }
+        }
+
+        // 构建摘要
+        val summaryLines = mutableListOf<String>()
+        
+        // 添加所有重要行
+        summaryLines.addAll(importantLines)
+        
+        // 如果还有空间，添加一些普通行
+        val remainingSpace = maxLines - importantLines.size
+        if (remainingSpace > 0) {
+            summaryLines.addAll(regularLines.take(remainingSpace))
+        }
+
+        return summaryLines.joinToString("\n") + "\n... [已摘要，原${lines.size}行]"
     }
 }
 

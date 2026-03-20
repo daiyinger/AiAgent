@@ -12,7 +12,7 @@ import java.net.UnknownHostException
  */
 class WebSearchTool : Tool(
     name = "web_search",
-    description = "Search the internet for information using multiple search engines (Bing, Sogou, 360). Automatically switches to another engine if one fails.",
+    description = "Searches internet for information using multiple search engines (Baidu, Google, Bing, Sogou, 360). Automatically switches to another engine if one fails.",
     parameters = listOf(
         ToolParameter(
             name = "query",
@@ -30,6 +30,8 @@ class WebSearchTool : Tool(
 ) {
     // 搜索引擎列表，按优先级排序
     private val searchEngines = listOf(
+        SearchEngine("百度", ::searchBaidu),
+        SearchEngine("Google", ::searchGoogle),
         SearchEngine("Bing", ::searchBing),
         SearchEngine("搜狗", ::searchSogou),
         SearchEngine("360搜索", ::search360)
@@ -95,6 +97,103 @@ class WebSearchTool : Tool(
         val name: String,
         val searchFunc: (String, Int) -> List<Map<String, String>>
     )
+
+    /**
+     * 使用百度搜索
+     */
+    private fun searchBaidu(query: String, maxResults: Int): List<Map<String, String>> {
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        val url = URL("https://www.baidu.com/s?wd=$encodedQuery&rn=$maxResults")
+
+        val connection = createConnection(url)
+
+        val results = mutableListOf<Map<String, String>>()
+
+        try {
+            connection.inputStream.bufferedReader().use { reader ->
+                val html = reader.readText()
+
+                // 百度搜索结果解析
+                val resultPattern = Regex(
+                    "<div class=\"result c-container \"[^>]*>.*?<h3[^>]*>.*?<a[^>]*href=\"([^\"]*)\"[^>]*>(.*?)</a>.*?</h3>.*?<div class=\"c-abstract\"[^>]*>(.*?)</div>.*?</div>",
+                    RegexOption.DOT_MATCHES_ALL
+                )
+
+                val matches = resultPattern.findAll(html)
+
+                for (match in matches.take(maxResults)) {
+                    var url = match.groupValues[1].trim()
+                    val title = cleanHtml(match.groupValues[2])
+                    val snippet = cleanHtml(match.groupValues[3])
+
+                    // 百度链接需要处理跳转
+                    if (url.startsWith("http://www.baidu.com/link?url=")) {
+                        url = url.substringAfter("url=").substringBefore("&")
+                    }
+
+                    if (title.isNotBlank() && url.isNotBlank()) {
+                        results.add(
+                            mapOf(
+                                "title" to title,
+                                "url" to url,
+                                "snippet" to snippet
+                            )
+                        )
+                    }
+                }
+            }
+        } finally {
+            connection.disconnect()
+        }
+
+        return results
+    }
+
+    /**
+     * 使用 Google 搜索
+     */
+    private fun searchGoogle(query: String, maxResults: Int): List<Map<String, String>> {
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        val url = URL("https://www.google.com/search?q=$encodedQuery&num=$maxResults")
+
+        val connection = createConnection(url)
+
+        val results = mutableListOf<Map<String, String>>()
+
+        try {
+            connection.inputStream.bufferedReader().use { reader ->
+                val html = reader.readText()
+
+                // Google 搜索结果解析
+                val resultPattern = Regex(
+                    "<div[^>]*class=\"g\"[^>]*>.*?<h3[^>]*>.*?<a[^>]*href=\"([^\"]*)\"[^>]*>(.*?)</a>.*?</h3>.*?<div[^>]*class=\"VwiC3b\"[^>]*>(.*?)</div>.*?</div>",
+                    RegexOption.DOT_MATCHES_ALL
+                )
+
+                val matches = resultPattern.findAll(html)
+
+                for (match in matches.take(maxResults)) {
+                    val url = match.groupValues[1].trim()
+                    val title = cleanHtml(match.groupValues[2])
+                    val snippet = cleanHtml(match.groupValues[3])
+
+                    if (title.isNotBlank() && url.isNotBlank() && !url.contains("google.com")) {
+                        results.add(
+                            mapOf(
+                                "title" to title,
+                                "url" to url,
+                                "snippet" to snippet
+                            )
+                        )
+                    }
+                }
+            }
+        } finally {
+            connection.disconnect()
+        }
+
+        return results
+    }
 
     /**
      * 使用 Bing 中国版搜索

@@ -33,6 +33,7 @@ object ToolManager {
         registerTool(AndroidProjectAnalysisTool())
         registerTool(CompileProjectTool())
         registerTool(WebSearchTool())
+        registerTool(GetCurrentTimeTool())
     }
 
     private fun registerTool(tool: Tool) {
