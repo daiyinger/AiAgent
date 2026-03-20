@@ -193,11 +193,11 @@ fun SettingsPanel(
                                     .fillMaxWidth()
                                     .padding(2.dp)
                                     .background(
-                                        if (provider.id == selectedProviderId) Color(0xFF007ACC) else Color.Transparent
+                                        if (provider.id == selectedProviderId) Color(0xFF3A6B99) else Color.Transparent
                                     )
                                     .border(
                                         1.dp,
-                                        if (provider.id == selectedProviderId) Color(0xFF007ACC) else Color.Transparent,
+                                        if (provider.id == selectedProviderId) Color(0xFF3A6B99) else Color.Transparent,
                                         RoundedCornerShape(4.dp)
                                     )
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
@@ -273,15 +273,7 @@ fun SettingsPanel(
                             .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
                             .padding(horizontal = 8.dp, vertical = 6.dp)
                             .background(JewelTheme.globalColors.panelBackground)
-                            .focusRequester(providerNameFocusRequester)
-                            .onFocusChanged { focusState ->
-                                if (focusState.isFocused) {
-                                    currentProviderName = TextFieldValue(
-                                        text = currentProviderName.text,
-                                        selection = androidx.compose.ui.text.TextRange(currentProviderName.text.length)
-                                    )
-                                }
-                            },
+                            .focusRequester(providerNameFocusRequester),
                         singleLine = true,
                         textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
                         cursorBrush = SolidColor(Color.White),
@@ -289,9 +281,6 @@ fun SettingsPanel(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable {
-                                        providerNameFocusRequester.requestFocus()
-                                    }
                             ) {
                                 if (currentProviderName.text.isEmpty()) {
                                     Text(
@@ -394,15 +383,7 @@ fun SettingsPanel(
                             .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
                             .padding(horizontal = 8.dp, vertical = 6.dp)
                             .background(JewelTheme.globalColors.panelBackground)
-                            .focusRequester(apiUrlFocusRequester)
-                            .onFocusChanged { focusState ->
-                                if (focusState.isFocused) {
-                                    currentApiUrl = TextFieldValue(
-                                        text = currentApiUrl.text,
-                                        selection = androidx.compose.ui.text.TextRange(currentApiUrl.text.length)
-                                    )
-                                }
-                            },
+                            .focusRequester(apiUrlFocusRequester),
                         singleLine = true,
                         textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
                         cursorBrush = SolidColor(Color.White),
@@ -410,9 +391,6 @@ fun SettingsPanel(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable {
-                                        apiUrlFocusRequester.requestFocus()
-                                    }
                             ) {
                                 if (currentApiUrl.text.isEmpty()) {
                                     Text(
@@ -445,15 +423,7 @@ fun SettingsPanel(
                             .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
                             .padding(horizontal = 8.dp, vertical = 6.dp)
                             .background(JewelTheme.globalColors.panelBackground)
-                            .focusRequester(apiKeyFocusRequester)
-                            .onFocusChanged { focusState ->
-                                if (focusState.isFocused) {
-                                    currentApiKey = TextFieldValue(
-                                        text = currentApiKey.text,
-                                        selection = androidx.compose.ui.text.TextRange(currentApiKey.text.length)
-                                    )
-                                }
-                            },
+                            .focusRequester(apiKeyFocusRequester),
                         singleLine = true,
                         textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
                         cursorBrush = SolidColor(Color.White),
@@ -461,9 +431,6 @@ fun SettingsPanel(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable {
-                                        apiKeyFocusRequester.requestFocus()
-                                    }
                             ) {
                                 if (currentApiKey.text.isEmpty()) {
                                     Text(
@@ -540,7 +507,7 @@ fun SettingsPanel(
                                                 }
                                             }
                                             .background(
-                                                if (selectedModels.contains(model)) Color(0xFF007ACC).copy(alpha = 0.3f) else Color.Transparent,
+                                                if (selectedModels.contains(model)) Color(0xFF3A6B99).copy(alpha = 0.3f) else Color.Transparent,
                                                 RoundedCornerShape(4.dp)
                                             )
                                             .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -551,11 +518,11 @@ fun SettingsPanel(
                                                 .size(16.dp)
                                                 .border(
                                                     1.dp,
-                                                    if (selectedModels.contains(model)) Color(0xFF007ACC) else Color.Gray,
+                                                    if (selectedModels.contains(model)) Color(0xFF3A6B99) else Color.Gray,
                                                     RoundedCornerShape(4.dp)
                                                 )
                                                 .background(
-                                                    if (selectedModels.contains(model)) Color(0xFF007ACC) else Color.Transparent
+                                                    if (selectedModels.contains(model)) Color(0xFF3A6B99) else Color.Transparent
                                                 )
                                         ) {
                                             if (selectedModels.contains(model)) {
@@ -606,19 +573,43 @@ fun SettingsPanel(
                         androidx.compose.foundation.text.BasicTextField(
                             value = currentTimeout,
                             onValueChange = { 
-                                val timeout = it.text.toIntOrNull() ?: 60
-                                currentTimeout = TextFieldValue(timeout.toString())
-                                settings.providers[currentProviderIndex].timeoutSeconds = timeout
+                                if (it.text.isEmpty()) {
+                                    currentTimeout = TextFieldValue("", selection = it.selection)
+                                } else {
+                                    val timeout = it.text.toIntOrNull() ?: 60
+                                    currentTimeout = TextFieldValue(it.text, selection = it.selection)
+                                    settings.providers[currentProviderIndex].timeoutSeconds = timeout
+                                }
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
                                 .padding(horizontal = 8.dp, vertical = 6.dp)
                                 .background(JewelTheme.globalColors.panelBackground)
-                                .focusRequester(timeoutFocusRequester),
+                                .focusRequester(timeoutFocusRequester)
+                                .onFocusChanged { focusState ->
+                                    if (!focusState.isFocused && currentTimeout.text.isEmpty()) {
+                                        currentTimeout = TextFieldValue("60")
+                                        settings.providers[currentProviderIndex].timeoutSeconds = 60
+                                    }
+                                },
                             singleLine = true,
                             textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
-                            cursorBrush = SolidColor(Color.White)
+                            cursorBrush = SolidColor(Color.White),
+                            decorationBox = { innerTextField ->
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                ) {
+                                    if (currentTimeout.text.isEmpty()) {
+                                        Text(
+                                            text = "默认: 60",
+                                            style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            }
                         )
                     }
                     
@@ -627,19 +618,43 @@ fun SettingsPanel(
                         androidx.compose.foundation.text.BasicTextField(
                             value = currentTemperature,
                             onValueChange = { 
-                                val temperature = it.text.toDoubleOrNull()?.coerceIn(0.0, 1.0) ?: 0.7
-                                currentTemperature = TextFieldValue(temperature.toString())
-                                settings.providers[currentProviderIndex].temperature = temperature
+                                if (it.text.isEmpty()) {
+                                    currentTemperature = TextFieldValue("", selection = it.selection)
+                                } else {
+                                    val temperature = it.text.toDoubleOrNull()?.coerceIn(0.0, 1.0) ?: 0.7
+                                    currentTemperature = TextFieldValue(it.text, selection = it.selection)
+                                    settings.providers[currentProviderIndex].temperature = temperature
+                                }
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
                                 .padding(horizontal = 8.dp, vertical = 6.dp)
                                 .background(JewelTheme.globalColors.panelBackground)
-                                .focusRequester(temperatureFocusRequester),
+                                .focusRequester(temperatureFocusRequester)
+                                .onFocusChanged { focusState ->
+                                    if (!focusState.isFocused && currentTemperature.text.isEmpty()) {
+                                        currentTemperature = TextFieldValue("0.7")
+                                        settings.providers[currentProviderIndex].temperature = 0.7
+                                    }
+                                },
                             singleLine = true,
                             textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
-                            cursorBrush = SolidColor(Color.White)
+                            cursorBrush = SolidColor(Color.White),
+                            decorationBox = { innerTextField ->
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                ) {
+                                    if (currentTemperature.text.isEmpty()) {
+                                        Text(
+                                            text = "默认: 0.7",
+                                            style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            }
                         )
                     }
                     
@@ -648,19 +663,43 @@ fun SettingsPanel(
                         androidx.compose.foundation.text.BasicTextField(
                             value = currentTopP,
                             onValueChange = { 
-                                val topP = it.text.toDoubleOrNull()?.coerceIn(0.0, 1.0) ?: 0.9
-                                currentTopP = TextFieldValue(topP.toString())
-                                settings.providers[currentProviderIndex].topP = topP
+                                if (it.text.isEmpty()) {
+                                    currentTopP = TextFieldValue("", selection = it.selection)
+                                } else {
+                                    val topP = it.text.toDoubleOrNull()?.coerceIn(0.0, 1.0) ?: 0.9
+                                    currentTopP = TextFieldValue(it.text, selection = it.selection)
+                                    settings.providers[currentProviderIndex].topP = topP
+                                }
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
                                 .padding(horizontal = 8.dp, vertical = 6.dp)
                                 .background(JewelTheme.globalColors.panelBackground)
-                                .focusRequester(topPFocusRequester),
+                                .focusRequester(topPFocusRequester)
+                                .onFocusChanged { focusState ->
+                                    if (!focusState.isFocused && currentTopP.text.isEmpty()) {
+                                        currentTopP = TextFieldValue("0.9")
+                                        settings.providers[currentProviderIndex].topP = 0.9
+                                    }
+                                },
                             singleLine = true,
                             textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
-                            cursorBrush = SolidColor(Color.White)
+                            cursorBrush = SolidColor(Color.White),
+                            decorationBox = { innerTextField ->
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                ) {
+                                    if (currentTopP.text.isEmpty()) {
+                                        Text(
+                                            text = "默认: 0.9",
+                                            style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            }
                         )
                     }
                     
@@ -669,19 +708,43 @@ fun SettingsPanel(
                         androidx.compose.foundation.text.BasicTextField(
                             value = currentContextLength,
                             onValueChange = { 
-                                val contextLength = it.text.toIntOrNull()?.coerceAtLeast(512) ?: 32768
-                                currentContextLength = TextFieldValue(contextLength.toString())
-                                settings.providers[currentProviderIndex].contextLength = contextLength
+                                if (it.text.isEmpty()) {
+                                    currentContextLength = TextFieldValue("", selection = it.selection)
+                                } else {
+                                    val contextLength = it.text.toIntOrNull()?.coerceAtLeast(512) ?: 32768
+                                    currentContextLength = TextFieldValue(it.text, selection = it.selection)
+                                    settings.providers[currentProviderIndex].contextLength = contextLength
+                                }
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
                                 .padding(horizontal = 8.dp, vertical = 6.dp)
                                 .background(JewelTheme.globalColors.panelBackground)
-                                .focusRequester(contextLengthFocusRequester),
+                                .focusRequester(contextLengthFocusRequester)
+                                .onFocusChanged { focusState ->
+                                    if (!focusState.isFocused && currentContextLength.text.isEmpty()) {
+                                        currentContextLength = TextFieldValue("32768")
+                                        settings.providers[currentProviderIndex].contextLength = 32768
+                                    }
+                                },
                             singleLine = true,
                             textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
-                            cursorBrush = SolidColor(Color.White)
+                            cursorBrush = SolidColor(Color.White),
+                            decorationBox = { innerTextField ->
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                ) {
+                                    if (currentContextLength.text.isEmpty()) {
+                                        Text(
+                                            text = "默认: 32768",
+                                            style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            }
                         )
                     }
                 }
