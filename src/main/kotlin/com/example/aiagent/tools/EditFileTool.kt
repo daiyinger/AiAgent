@@ -10,283 +10,259 @@ import com.intellij.openapi.vfs.VirtualFile
 
 class EditFileTool : Tool(
     name = "edit_file",
-    description = "Edit a file by replacing a specific portion of its content. STRONGLY RECOMMENDED: Use start_line and end_line for precise line-level replacement instead of old_text, which often fails due to whitespace/indentation differences.",
+    description = """
+        Edit a file by replacing lines at specified line numbers.
+        
+        Usage:
+        - Provide 'path', 'new_text', 'start_line', and 'end_line' to replace specific lines
+        - If file doesn't exist, it will be created with new_text content
+        - Line numbers are 1-based (first line is line 1)
+        - To insert new lines, set start_line = end_line + 1 (e.g., to insert after line 5, use start_line=6, end_line=5)
+        
+        Example:
+        - Replace lines 10-15: start_line=10, end_line=15, new_text="new code here"
+        - Insert after line 10: start_line=11, end_line=10, new_text="inserted line"
+    """.trimIndent(),
     parameters = listOf(
-         ToolParameter(name = "path", type = "string", description = "The file path to edit", required = true),
-        ToolParameter(name = "new_text", type = "string", description = "The new code to insert", required = true),
-        // 将 old_text 改为非必填，或者作为备用选项
-        ToolParameter(name = "old_text", type = "string", description = "The exact text to replace. (Optional if start_line and end_line are provided) WARNING: old_text often fails due to whitespace/indentation differences.", required = false),
-        ToolParameter(name = "start_line", type = "integer", description = "The starting line number (1-based) to replace. RECOMMENDED: Use this with end_line for precise replacement.", required = false),
-        ToolParameter(name = "end_line", type = "integer", description = "The ending line number (1-based) to replace. RECOMMENDED: Use this with start_line for precise replacement.", required = false)
+        ToolParameter(
+            name = "path",
+            type = "string",
+            description = "The file path to edit (relative to project root or absolute)",
+            required = true
+        ),
+        ToolParameter(
+            name = "new_text",
+            type = "string",
+            description = "The new text content to insert/replace with",
+            required = true
+        ),
+        ToolParameter(
+            name = "start_line",
+            type = "integer",
+            description = "Starting line number (1-based). For insertion after line N, use start_line=N+1",
+            required = true
+        ),
+        ToolParameter(
+            name = "end_line",
+            type = "integer",
+            description = "Ending line number (1-based). For insertion, use end_line=start_line-1",
+            required = true
+        )
     )
 ) {
     private fun log(message: String) = LogService.log("[EditFileTool] $message")
-    
+
     override suspend fun execute(
         project: Project,
         params: Map<String, Any>,
         onOutput: ((String) -> Unit)?,
         isCancelled: (() -> Boolean)?
     ): ToolResult {
-        val path = params["path"] as? String ?: return ToolResult.Error("Missing required parameter: path")
-        val newText = (params["new_text"] as? String)?.replace("\r\n", "\n") 
+        val path = params["path"] as? String
+            ?: return ToolResult.Error("Missing required parameter: path")
+        
+        val newText = (params["new_text"] as? String)?.replace("\r\n", "\n")
             ?: return ToolResult.Error("Missing required parameter: new_text")
         
-        // 预处理：统一将 \r\n 替换为 \n，防止 AI 产生的系统级换行符差异导致匹配失败
-        val oldText = (params["old_text"] as? String)?.replace("\r\n", "\n")
-        
-        // 检查是否提供了行号参数
         val startLine = (params["start_line"] as? Number)?.toInt()
-        val endLine = (params["end_line"] as? Number)?.toInt()
+            ?: return ToolResult.Error("Missing required parameter: start_line")
         
-        // 暂时跳过参数验证，因为文件可能不存在（创建新文件）
+        val endLine = (params["end_line"] as? Number)?.toInt()
+            ?: return ToolResult.Error("Missing required parameter: end_line")
 
-        log("开始执行编辑文件操作")
-        log("参数: path=$path")
-        if (oldText != null) {
-            log("参数: oldText长度=${oldText.length}, 前50字符=${oldText.take(50)}")
-        } else {
-            log("参数: oldText=null (使用行号模式)")
+        log("=== 开始编辑文件 ===")
+        log("路径: $path")
+        log("起始行: $startLine, 结束行: $endLine")
+        log("新文本长度: ${newText.length}")
+
+        if (startLine < 1) {
+            return ToolResult.Error("start_line must be >= 1, got $startLine")
         }
-        log("参数: newText长度=${newText.length}, 前50字符=${newText.take(50)}")
-        log("参数: startLine=${startLine}, endLine=${endLine}")
 
-        // 验证行号参数
-        if (startLine != null && endLine != null) {
-            if (startLine < 1) {
-                log("错误: startLine必须大于0, 实际值=$startLine")
-                return ToolResult.Error("Invalid start_line: must be greater than 0, got $startLine")
-            }
-            if (endLine < startLine) {
-                log("错误: endLine必须大于或等于startLine, 实际值=$endLine")
-                return ToolResult.Error("Invalid end_line: must be greater than or equal to start_line, got $endLine")
-            }
+        if (endLine < startLine - 1) {
+            return ToolResult.Error("end_line must be >= start_line - 1, got end_line=$endLine, start_line=$startLine")
         }
 
         return try {
             val resolvedPath = resolveFilePath(project, path)
                 ?: return ToolResult.Error("Project base path not found")
 
-            log("解析后的路径: $resolvedPath")
+            log("解析后路径: $resolvedPath")
             val virtualFile = findVirtualFile(resolvedPath)
 
             if (virtualFile != null && virtualFile.exists()) {
-                log("文件已存在，开始编辑: ${virtualFile.path}")
-                handleExistingFile(project, virtualFile, path, mapOf(
-                    "path" to path,
-                    "old_text" to (oldText ?: ""),
-                    "new_text" to newText,
-                    "start_line" to (startLine ?: 0),
-                    "end_line" to (endLine ?: 0)
-                ) as Map<String, Any>)
+                log("文件存在，执行编辑")
+                editExistingFile(project, virtualFile, path, startLine, endLine, newText)
             } else {
-                log("文件不存在，创建新文件: $path")
-                handleNewFile(project, path, newText)
+                log("文件不存在，创建新文件")
+                createNewFile(project, path, newText)
             }
         } catch (e: Exception) {
-            log("编辑文件失败: ${e.message}, 异常类型=${e.javaClass.simpleName}")
-            log("异常堆栈: ${e.stackTraceToString()}")
+            log("编辑失败: ${e.message}")
+            log("堆栈: ${e.stackTraceToString()}")
             ToolResult.Error("Error editing file: ${e.message}")
         }
     }
 
-    private fun handleExistingFile(
-        project: Project, virtualFile: VirtualFile, path: String, params: Map<String, Any>
-    ): ToolResult {
-        log("handleExistingFile: 开始处理已存在文件")
-        val document = FileDocumentManager.getInstance().getDocument(virtualFile) ?: return ToolResult.Error("...")
-        val newText = (params["new_text"] as String).replace("\r\n", "\n")
-        
-        val startLine = (params["start_line"] as? Number)?.toInt()
-        val endLine = (params["end_line"] as? Number)?.toInt()
-        val oldText = params["old_text"] as? String
-
-        log("handleExistingFile: startLine=$startLine, endLine=$endLine, oldText=${oldText?.take(30)}...")
-
-        // 确保至少提供了 old_text 或行号
-        if (oldText == null && (startLine == null || endLine == null)) {
-            return ToolResult.Error("Missing required parameter: either 'old_text' or both 'start_line' and 'end_line' must be provided")
-        }
-
-        return try {
-            if (startLine != null && endLine != null && startLine > 0 && endLine > 0) {
-                // =============== 方案 A：基于行号精确替换 ===============
-                log("使用行号替换模式: startLine=$startLine, endLine=$endLine")
-                val lineCount = document.lineCount
-                log("文件总行数: $lineCount")
-                
-                if (startLine < 1 || endLine > lineCount) {
-                    log("错误: 行号超出范围. startLine=$startLine, endLine=$endLine, lineCount=$lineCount")
-                    return ToolResult.Error("Invalid line numbers. File has $lineCount lines, but you specified $startLine to $endLine.")
-                }
-                
-                // 转换为 IntelliJ 的 0-based offset
-                val startOffset = document.getLineStartOffset(startLine - 1)
-                val endOffset = document.getLineEndOffset(endLine - 1)
-                log("行号转offset: startOffset=$startOffset, endOffset=$endOffset")
-                
-                WriteCommandAction.runWriteCommandAction(project) {
-                    document.replaceString(startOffset, endOffset, newText)
-                    FileDocumentManager.getInstance().saveDocument(document)
-                }
-                log("行号替换成功")
-                
-                val startLineText = "Replaced lines $startLine to $endLine"
-                val oldLineCount = endLine - startLine + 1
-                val newLineCount = newText.lines().size
-                val startLineNumber = startLine
-                
-                buildSuccessResult(path, startLineText, newText, oldLineCount, newLineCount, startLineNumber)
-
-            } else if (oldText != null) {
-                // =============== 方案 B：退回到之前的字符串匹配 ===============
-                log("使用文本匹配替换模式")
-                val cleanOld = oldText.replace("\r\n", "\n")
-                val fileContent = document.text
-                log("文件内容长度: ${fileContent.length}")
-                
-                // 1. 尝试精确检查 
-                val startIndex = fileContent.indexOf(cleanOld) 
-                log("精确查找结果: startIndex=$startIndex")
-                if (startIndex == -1) { 
-                    // 【新增】：去空格模糊检查，帮助 AI 诊断问题 
-                    val strippedFile = fileContent.replace(Regex("\\s+"), "") 
-                    val strippedOld = cleanOld.replace(Regex("\\s+"), "") 
-                    log("模糊查找: strippedFile长度=${strippedFile.length}, strippedOld长度=${strippedOld.length}")
-                    log("模糊查找结果: ${strippedFile.contains(strippedOld)}")
-                    
-                    if (strippedFile.contains(strippedOld)) { 
-                        log("错误: 匹配失败，空格/缩进不同")
-                        return ToolResult.Error( 
-                            "Match failed due to whitespace/indentation differences. " + 
-                            "The code exists, but your 'old_text' has different spaces or newlines. " + 
-                            "CRITICAL: You must copy the exact indentation and blank lines from the file!" 
-                        ) 
-                    } else { 
-                        log("错误: 未找到匹配文本")
-                        return ToolResult.Error("Old text not found in file: $path. Are you sure this exact code block exists?") 
-                    } 
-                } 
-                
-                // 2. 防御性检查：确保 oldText 在文件中是唯一的
-                val secondIndex = fileContent.indexOf(cleanOld, startIndex + cleanOld.length)
-                log("唯一性检查: secondIndex=$secondIndex")
-                if (secondIndex != -1) {
-                    log("警告: 文本重复出现，将替换第一个匹配项")
-                } 
-                
-                // 找到唯一匹配，进行替换
-                val startOffset = startIndex
-                val endOffset = startIndex + cleanOld.length
-                log("准备替换: startOffset=$startOffset, endOffset=$endOffset, 替换长度=${cleanOld.length}")
-                
-                WriteCommandAction.runWriteCommandAction(project) {
-                    document.replaceString(startOffset, endOffset, newText)
-                    FileDocumentManager.getInstance().saveDocument(document)
-                }
-                log("文本替换成功")
-                
-                val textBeforeOldText = fileContent.substring(0, startIndex)
-                val linesBefore = textBeforeOldText.lines()
-                val actualLineCount = if (textBeforeOldText.isEmpty()) 0 else {
-                    if (textBeforeOldText.endsWith("\n")) {
-                        linesBefore.size + 1
-                    } else {
-                        linesBefore.size
-                    }
-                }
-                val startLineNumber = actualLineCount + 1
-                val oldLineCount = cleanOld.lines().size
-                val newLineCount = newText.lines().size
-                log("替换统计: startLineNumber=$startLineNumber, oldLineCount=$oldLineCount, newLineCount=$newLineCount")
-                
-                buildSuccessResult(path, cleanOld, newText, oldLineCount, newLineCount, startLineNumber)
-            } else {
-                log("错误: 缺少必要参数")
-                ToolResult.Error("You must provide either 'old_text' OR ('start_line' and 'end_line').")
-            }
-        } catch (e: IndexOutOfBoundsException) {
-            log("异常: IndexOutOfBoundsException - ${e.message}")
-            ToolResult.Error("Invalid line numbers provided. The file might be shorter than expected.")
-        } catch (e: Exception) {
-            log("异常: ${e.javaClass.simpleName} - ${e.message}")
-            log("异常堆栈: ${e.stackTraceToString()}")
-            ToolResult.Error("Error in handleExistingFile: ${e.message}")
-        }
-    }
-
-    private fun handleNewFile(
+    private fun editExistingFile(
         project: Project,
+        virtualFile: VirtualFile,
         path: String,
+        startLine: Int,
+        endLine: Int,
         newText: String
     ): ToolResult {
-        log("handleNewFile: 开始创建新文件")
-        log("handleNewFile: path=$path")
-        log("handleNewFile: newText长度=${newText.length}")
+        val document = FileDocumentManager.getInstance().getDocument(virtualFile)
+            ?: return ToolResult.Error("Cannot get document for file: $path")
 
-        val document = WriteCommandAction.runWriteCommandAction<com.intellij.openapi.editor.Document?>(project) {
-            try {
-                val basePath = project.basePath ?: return@runWriteCommandAction null
-                log("handleNewFile: basePath=$basePath")
-                val baseDir = LocalFileSystem.getInstance().findFileByPath(basePath) ?: return@runWriteCommandAction null
-                log("handleNewFile: baseDir=${baseDir.path}")
+        val lineCount = document.lineCount
+        log("文件总行数: $lineCount")
 
-                val normalizedRelPath = normalizePath(path)
-                log("handleNewFile: normalizedRelPath=$normalizedRelPath")
-                val parentDirPath = normalizedRelPath.substringBeforeLast('/', "")
-                val fileName = normalizedRelPath.substringAfterLast('/')
-                log("handleNewFile: parentDirPath=$parentDirPath, fileName=$fileName")
+        val isInsertion = endLine == startLine - 1
+        val oldText: String
+        val actualStartLine: Int
+        val actualEndLine: Int
 
-                // 使用 VfsUtil 一键创建多级目录，替代原有的 for 循环
-                val targetDir = if (parentDirPath.isEmpty()) baseDir else VfsUtil.createDirectoryIfMissing(baseDir, parentDirPath)
-                log("handleNewFile: targetDir=${targetDir?.path}")
-                val createdVirtualFile = targetDir?.createChildData(this, fileName)
-                log("handleNewFile: createdVirtualFile=${createdVirtualFile?.path}")
-
-                val doc = FileDocumentManager.getInstance().getDocument(createdVirtualFile ?: return@runWriteCommandAction null) ?: return@runWriteCommandAction null
-                doc.setText(newText)
-                FileDocumentManager.getInstance().saveDocument(doc)
-                log("handleNewFile: 文件内容已设置并保存")
-                doc
-            } catch (e: Exception) {
-                log("handleNewFile: 创建文件异常 - ${e.javaClass.simpleName}: ${e.message}")
-                log("handleNewFile: 异常堆栈 - ${e.stackTraceToString()}")
-                null
+        if (isInsertion) {
+            if (startLine > lineCount + 1) {
+                return ToolResult.Error("Cannot insert at line $startLine: file only has $lineCount lines")
             }
-        } ?: return ToolResult.Error("Could not create or initialize file: $path")
+            
+            actualStartLine = startLine
+            actualEndLine = startLine - 1
+            oldText = ""
+            
+            log("插入模式: 在第 $startLine 行后插入")
+            
+            val insertOffset = if (startLine <= lineCount) {
+                document.getLineEndOffset(startLine - 1)
+            } else {
+                document.textLength
+            }
+            
+            val textToInsert = if (newText.startsWith("\n")) newText else "\n$newText"
+            
+            WriteCommandAction.runWriteCommandAction(project) {
+                document.insertString(insertOffset, textToInsert)
+                FileDocumentManager.getInstance().saveDocument(document)
+            }
+            
+            log("插入成功")
+        } else {
+            if (startLine > lineCount) {
+                return ToolResult.Error("start_line ($startLine) exceeds file length ($lineCount lines)")
+            }
+            if (endLine > lineCount) {
+                return ToolResult.Error("end_line ($endLine) exceeds file length ($lineCount lines)")
+            }
 
-        log("handleNewFile: 新文件创建成功")
-        return buildSuccessResult(path, "", newText, 0, newText.lines().size, 1)
-    }
+            actualStartLine = startLine
+            actualEndLine = endLine
 
-    private fun buildSuccessResult(
-        path: String,
-        oldText: String,
-        newText: String,
-        oldLineCount: Int,
-        newLineCount: Int,
-        startLineNumber: Int
-    ): ToolResult {
-        val lineChange = newLineCount - oldLineCount
-        val lineChangeText = when {
-            lineChange > 0 -> "+$lineChange "
-            lineChange < 0 -> "$lineChange "
-            else -> "0 "
+            val startOffset = document.getLineStartOffset(startLine - 1)
+            val endOffset = document.getLineEndOffset(endLine - 1)
+            
+            oldText = document.getText(com.intellij.openapi.util.TextRange.create(startOffset, endOffset))
+            
+            log("替换模式: 替换第 $startLine 到 $endLine 行")
+            log("原始文本长度: ${oldText.length}")
+            
+            WriteCommandAction.runWriteCommandAction(project) {
+                document.replaceString(startOffset, endOffset, newText)
+                FileDocumentManager.getInstance().saveDocument(document)
+            }
+            
+            log("替换成功")
         }
+
+        val oldLineCount = if (oldText.isEmpty()) 0 else oldText.lines().size
+        val newLineCount = newText.lines().size
+        val lineChange = newLineCount - oldLineCount
 
         return ToolResult.Success(
             mapOf(
                 "path" to path,
-                "message" to "File edited successfully ($lineChangeText)",
-                "changes" to mapOf(
-                    "old_text_length" to oldText.length,
-                    "new_text_length" to newText.length,
-                    "old_line_count" to oldLineCount,
-                    "new_line_count" to newLineCount,
-                    "line_change" to lineChange,
-                    "start_line_number" to startLineNumber
-                )
+                "success" to true,
+                "message" to buildChangeMessage(lineChange, isInsertion),
+                "old_text" to oldText,
+                "new_text" to newText,
+                "start_line" to actualStartLine,
+                "end_line" to actualEndLine,
+                "old_line_count" to oldLineCount,
+                "new_line_count" to newLineCount,
+                "line_change" to lineChange,
+                "is_insertion" to isInsertion
             )
         )
+    }
+
+    private fun createNewFile(
+        project: Project,
+        path: String,
+        newText: String
+    ): ToolResult {
+        log("创建新文件: $path")
+
+        val document = WriteCommandAction.runWriteCommandAction<com.intellij.openapi.editor.Document?>(project) {
+            try {
+                val basePath = project.basePath ?: return@runWriteCommandAction null
+                val baseDir = LocalFileSystem.getInstance().findFileByPath(basePath)
+                    ?: return@runWriteCommandAction null
+
+                val normalizedRelPath = normalizePath(path)
+                val parentDirPath = normalizedRelPath.substringBeforeLast('/', "")
+                val fileName = normalizedRelPath.substringAfterLast('/')
+
+                log("父目录: $parentDirPath, 文件名: $fileName")
+
+                val targetDir = if (parentDirPath.isEmpty()) {
+                    baseDir
+                } else {
+                    VfsUtil.createDirectoryIfMissing(baseDir, parentDirPath)
+                }
+
+                val createdFile = targetDir?.createChildData(this, fileName)
+                val doc = createdFile?.let { 
+                    FileDocumentManager.getInstance().getDocument(it) 
+                }
+
+                doc?.setText(newText)
+                FileDocumentManager.getInstance().saveDocument(doc ?: return@runWriteCommandAction null)
+                
+                log("新文件创建成功")
+                doc
+            } catch (e: Exception) {
+                log("创建文件异常: ${e.message}")
+                null
+            }
+        } ?: return ToolResult.Error("Failed to create file: $path")
+
+        val newLineCount = newText.lines().size
+
+        return ToolResult.Success(
+            mapOf(
+                "path" to path,
+                "success" to true,
+                "message" to "Created new file with $newLineCount lines",
+                "old_text" to "",
+                "new_text" to newText,
+                "start_line" to 1,
+                "end_line" to 0,
+                "old_line_count" to 0,
+                "new_line_count" to newLineCount,
+                "line_change" to newLineCount,
+                "is_insertion" to false,
+                "is_new_file" to true
+            )
+        )
+    }
+
+    private fun buildChangeMessage(lineChange: Int, isInsertion: Boolean): String {
+        return when {
+            isInsertion -> "Inserted ${if (lineChange > 0) "$lineChange lines" else "content"}"
+            lineChange > 0 -> "Added $lineChange lines"
+            lineChange < 0 -> "Removed ${-lineChange} lines"
+            else -> "No line change"
+        }
     }
 }

@@ -54,60 +54,130 @@ import com.example.aiagent.service.LogService
 
 // Diff 结果数据类
 data class DiffLine(
-    val lineNumber: Int,
+    val oldLineNumber: Int?,
+    val newLineNumber: Int?,
     val content: String,
     val type: DiffType
 )
 
-// Diff 类型枚举
 enum class DiffType {
-    ADD,    // 新增行
-    DELETE, // 删除行
-    KEEP    // 保持不变的行
+    ADD,
+    DELETE,
+    KEEP,
+    CONTEXT
 }
 
-// 简单的 Diff 算法实现
-fun computeDiff(oldText: String, newText: String): List<DiffLine> {
+fun computeDiff(oldText: String, newText: String, contextLines: Int = 3): List<DiffLine> {
     val oldLines = oldText.lines()
     val newLines = newText.lines()
+    
+    if (oldText.isEmpty() && newText.isEmpty()) {
+        return emptyList()
+    }
+    
+    if (oldText.isEmpty()) {
+        return newLines.mapIndexed { index, line ->
+            DiffLine(null, index + 1, line, DiffType.ADD)
+        }
+    }
+    
+    if (newText.isEmpty()) {
+        return oldLines.mapIndexed { index, line ->
+            DiffLine(index + 1, null, line, DiffType.DELETE)
+        }
+    }
+    
+    val lcs = computeLCS(oldLines, newLines)
+    
+    val rawDiff = mutableListOf<DiffLine>()
+    var oldIdx = 0
+    var newIdx = 0
+    var lcsIdx = 0
+    
+    while (oldIdx < oldLines.size || newIdx < newLines.size) {
+        if (lcsIdx < lcs.size && oldIdx < oldLines.size && newIdx < newLines.size &&
+            oldLines[oldIdx] == lcs[lcsIdx] && newLines[newIdx] == lcs[lcsIdx]) {
+            rawDiff.add(DiffLine(oldIdx + 1, newIdx + 1, oldLines[oldIdx], DiffType.KEEP))
+            oldIdx++
+            newIdx++
+            lcsIdx++
+        } else if (oldIdx < oldLines.size && (lcsIdx >= lcs.size || oldLines[oldIdx] != lcs.getOrNull(lcsIdx))) {
+            rawDiff.add(DiffLine(oldIdx + 1, null, oldLines[oldIdx], DiffType.DELETE))
+            oldIdx++
+        } else if (newIdx < newLines.size) {
+            rawDiff.add(DiffLine(null, newIdx + 1, newLines[newIdx], DiffType.ADD))
+            newIdx++
+        }
+    }
+    
+    val changeIndices = rawDiff.mapIndexedNotNull { index, diffLine ->
+        if (diffLine.type != DiffType.KEEP) index else null
+    }
+    
+    if (changeIndices.isEmpty()) {
+        return rawDiff
+    }
+    
+    val rangesToInclude = mutableSetOf<Int>()
+    for (changeIdx in changeIndices) {
+        val start = maxOf(0, changeIdx - contextLines)
+        val end = minOf(rawDiff.size - 1, changeIdx + contextLines)
+        for (i in start..end) {
+            rangesToInclude.add(i)
+        }
+    }
+    
     val result = mutableListOf<DiffLine>()
+    var lastIncludedIdx = -2
     
-    var i = 0 // 旧文本行索引
-    var j = 0 // 新文本行索引
-    
-    while (i < oldLines.size || j < newLines.size) {
-        when {
-            i >= oldLines.size -> {
-                // 旧文本已遍历完，新文本剩余行都是新增
-                for (k in j until newLines.size) {
-                    result.add(DiffLine(k + 1, newLines[k], DiffType.ADD))
-                }
-                j = newLines.size
+    for (i in rawDiff.indices) {
+        if (i in rangesToInclude) {
+            if (i > lastIncludedIdx + 1 && result.isNotEmpty()) {
+                result.add(DiffLine(null, null, "...", DiffType.CONTEXT))
             }
-            j >= newLines.size -> {
-                // 新文本已遍历完，旧文本剩余行都是删除
-                for (k in i until oldLines.size) {
-                    result.add(DiffLine(k + 1, oldLines[k], DiffType.DELETE))
-                }
-                i = oldLines.size
-            }
-            oldLines[i] == newLines[j] -> {
-                // 行内容相同，保持不变
-                result.add(DiffLine(i + 1, oldLines[i], DiffType.KEEP))
-                i++
-                j++
-            }
-            else -> {
-                // 行内容不同，标记为删除和新增
-                result.add(DiffLine(i + 1, oldLines[i], DiffType.DELETE))
-                result.add(DiffLine(j + 1, newLines[j], DiffType.ADD))
-                i++
-                j++
-            }
+            result.add(rawDiff[i])
+            lastIncludedIdx = i
         }
     }
     
     return result
+}
+
+private fun computeLCS(oldLines: List<String>, newLines: List<String>): List<String> {
+    val m = oldLines.size
+    val n = newLines.size
+    
+    if (m == 0 || n == 0) return emptyList()
+    
+    val dp = Array(m + 1) { IntArray(n + 1) }
+    
+    for (i in 1..m) {
+        for (j in 1..n) {
+            if (oldLines[i - 1] == newLines[j - 1]) {
+                dp[i][j] = dp[i - 1][j - 1] + 1
+            } else {
+                dp[i][j] = maxOf(dp[i - 1][j], dp[i][j - 1])
+            }
+        }
+    }
+    
+    val lcs = mutableListOf<String>()
+    var i = m
+    var j = n
+    
+    while (i > 0 && j > 0) {
+        if (oldLines[i - 1] == newLines[j - 1]) {
+            lcs.add(0, oldLines[i - 1])
+            i--
+            j--
+        } else if (dp[i - 1][j] > dp[i][j - 1]) {
+            i--
+        } else {
+            j--
+        }
+    }
+    
+    return lcs
 }
 
 private fun log(message: String) {
@@ -1767,25 +1837,13 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
-                            // 显示文件修改的行数变化
                             if ((message.toolName == "editFile" || message.toolName == "edit_file") && !message.isExecuting) {
                                 val oldText = message.parameters["old_text"] as? String
                                 val newText = message.parameters["new_text"] as? String
                                 if (newText != null) {
-                                    var addCount = 0
-                                    var deleteCount = 0
-                                    
-                                    // 处理空字符串或null的特殊情况（新文件）
-                                    if (oldText == null || oldText.isBlank()) {
-                                        // 新文件，只计算新增行数
-                                        addCount = newText.lines().filter { it.isNotEmpty() }.size
-                                        deleteCount = 0
-                                    } else {
-                                        // 现有文件，计算差异
-                                        val diffLines = computeDiff(oldText, newText)
-                                        addCount = diffLines.count { it.type == DiffType.ADD }
-                                        deleteCount = diffLines.count { it.type == DiffType.DELETE }
-                                    }
+                                    val diffLines = computeDiff(oldText ?: "", newText)
+                                    val addCount = diffLines.count { it.type == DiffType.ADD }
+                                    val deleteCount = diffLines.count { it.type == DiffType.DELETE }
                                     
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -1834,24 +1892,12 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                             }
                         }
                     } else if ((message.toolName == "editFile" || message.toolName == "edit_file") && !message.isExecuting) {
-                        // 当没有文件名时，行数变化占满剩余空间
                         val oldText = message.parameters["old_text"] as? String
                         val newText = message.parameters["new_text"] as? String
                         if (newText != null) {
-                            var addCount = 0
-                            var deleteCount = 0
-                            
-                            // 处理空字符串或null的特殊情况（新文件）
-                            if (oldText == null || oldText.isBlank()) {
-                                // 新文件，只计算新增行数
-                                addCount = newText.lines().filter { it.isNotEmpty() }.size
-                                deleteCount = 0
-                            } else {
-                                // 现有文件，计算差异
-                                val diffLines = computeDiff(oldText, newText)
-                                addCount = diffLines.count { it.type == DiffType.ADD }
-                                deleteCount = diffLines.count { it.type == DiffType.DELETE }
-                            }
+                            val diffLines = computeDiff(oldText ?: "", newText)
+                            val addCount = diffLines.count { it.type == DiffType.ADD }
+                            val deleteCount = diffLines.count { it.type == DiffType.DELETE }
                             
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -2171,18 +2217,14 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                     }
                 }
                 
-                // 对于 editFile 工具，显示文件修改的差异
                 if (message.toolName == "editFile" || message.toolName == "edit_file") {
                     val oldText = message.parameters["old_text"] as? String
                     val newText = message.parameters["new_text"] as? String
-                    val startLineNumber = message.parameters["start_line_number"]?.let { value ->
-                        when (value) {
-                            is Number -> value.toInt()
-                            is String -> value.toIntOrNull() ?: 1
-                            else -> 1
-                        }
-                    } ?: 1
-                    if (oldText != null && newText != null) {
+                    val isNewFile = message.parameters["is_new_file"] as? Boolean == true
+                    val isInsertion = message.parameters["is_insertion"] as? Boolean == true
+                    val startLine = (message.parameters["start_line"] as? Number)?.toInt() ?: 1
+                    
+                    if (newText != null) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Column(
                             modifier = Modifier
@@ -2190,7 +2232,11 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                                 .background(Color(0xFF1A1A1A), RoundedCornerShape(6.dp))
                         ) {
                             Text(
-                                text = "文件修改差异",
+                                text = when {
+                                    isNewFile -> "新建文件"
+                                    isInsertion -> "插入内容"
+                                    else -> "文件修改差异"
+                                },
                                 style = JewelTheme.defaultTextStyle.copy(
                                     color = Color.LightGray,
                                     fontSize = 11.sp,
@@ -2198,81 +2244,86 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                                 ),
                                 modifier = Modifier.padding(8.dp)
                             )
+                            
                             val diffScrollState = rememberLazyListState()
-                            val diffLines = remember(oldText, newText, startLineNumber) {
-                                computeDiff(oldText, newText)
+                            val diffLines = remember(oldText, newText) {
+                                computeDiff(oldText ?: "", newText)
                             }
                             
-                            LazyColumn(
-                                state = diffScrollState,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(max = 200.dp)
-                                    .padding(8.dp)
-                            ) {
-                                items(diffLines.size) { index ->
-                                    val diffLine = diffLines[index]
-                                    // 计算实际文件行号
-                                    val actualLineNumber = when (diffLine.type) {
-                                        DiffType.ADD -> {
-                                            // 新增行：显示在新文件中的行号
-                                            // 简单计算：起始行号 + 新增行在新文本中的行号 - 1
-                                            startLineNumber + diffLine.lineNumber - 1
-                                        }
-                                        DiffType.DELETE -> {
-                                            // 删除行：显示在旧文件中的行号
-                                            startLineNumber + diffLine.lineNumber - 1
-                                        }
-                                        DiffType.KEEP -> {
-                                            // 未更改行：显示在文件中的行号
-                                            startLineNumber + diffLine.lineNumber - 1
-                                        }
-                                    }
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        // 显示差异类型图标
-                                        Text(
-                                            text = when (diffLine.type) {
-                                                DiffType.ADD -> "+"
-                                                DiffType.DELETE -> "-"
-                                                DiffType.KEEP -> " "
-                                            },
-                                            style = JewelTheme.defaultTextStyle.copy(
-                                                color = when (diffLine.type) {
-                                                    DiffType.ADD -> Color(0xFF4CAF50)
-                                                    DiffType.DELETE -> Color(0xFFF44336)
-                                                    DiffType.KEEP -> Color.LightGray
+                            if (diffLines.isNotEmpty()) {
+                                LazyColumn(
+                                    state = diffScrollState,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 200.dp)
+                                        .padding(8.dp)
+                                ) {
+                                    items(diffLines.size) { index ->
+                                        val diffLine = diffLines[index]
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = when (diffLine.type) {
+                                                    DiffType.ADD -> "+"
+                                                    DiffType.DELETE -> "-"
+                                                    DiffType.CONTEXT -> " "
+                                                    DiffType.KEEP -> " "
                                                 },
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 11.sp
-                                            ),
-                                            modifier = Modifier.width(20.dp)
-                                        )
-                                        // 显示行号
-                                        Text(
-                                            text = "${actualLineNumber}.",
-                                            style = JewelTheme.defaultTextStyle.copy(
-                                                color = Color.LightGray,
-                                                fontSize = 10.sp
-                                            ),
-                                            modifier = Modifier.width(30.dp)
-                                        )
-                                        // 显示行内容
-                                        Text(
-                                            text = diffLine.content,
-                                            style = JewelTheme.defaultTextStyle.copy(
-                                                color = when (diffLine.type) {
-                                                    DiffType.ADD -> Color(0xFF4CAF50)
-                                                    DiffType.DELETE -> Color(0xFFF44336)
-                                                    DiffType.KEEP -> Color.White
-                                                },
-                                                fontSize = 11.sp
-                                            ),
-                                            maxLines = 1,
-                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                        )
+                                                style = JewelTheme.defaultTextStyle.copy(
+                                                    color = when (diffLine.type) {
+                                                        DiffType.ADD -> Color(0xFF4CAF50)
+                                                        DiffType.DELETE -> Color(0xFFF44336)
+                                                        DiffType.CONTEXT -> Color(0xFF888888)
+                                                        DiffType.KEEP -> Color(0xFF888888)
+                                                    },
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 11.sp
+                                                ),
+                                                modifier = Modifier.width(16.dp)
+                                            )
+                                            
+                                            val lineNumText = when (diffLine.type) {
+                                                DiffType.CONTEXT -> "..."
+                                                DiffType.ADD -> {
+                                                    val lineNum = diffLine.newLineNumber ?: 1
+                                                    (startLine + lineNum - 1).toString()
+                                                }
+                                                DiffType.DELETE -> {
+                                                    val lineNum = diffLine.oldLineNumber ?: 1
+                                                    (startLine + lineNum - 1).toString()
+                                                }
+                                                DiffType.KEEP -> {
+                                                    val lineNum = diffLine.newLineNumber ?: 1
+                                                    (startLine + lineNum - 1).toString()
+                                                }
+                                            }
+                                            
+                                            Text(
+                                                text = lineNumText.padStart(4),
+                                                style = JewelTheme.defaultTextStyle.copy(
+                                                    color = Color(0xFF888888),
+                                                    fontSize = 10.sp
+                                                ),
+                                                modifier = Modifier.width(36.dp)
+                                            )
+                                            
+                                            Text(
+                                                text = diffLine.content,
+                                                style = JewelTheme.defaultTextStyle.copy(
+                                                    color = when (diffLine.type) {
+                                                        DiffType.ADD -> Color(0xFF4CAF50)
+                                                        DiffType.DELETE -> Color(0xFFF44336)
+                                                        DiffType.CONTEXT -> Color(0xFF888888)
+                                                        DiffType.KEEP -> Color(0xFFAAAAAA)
+                                                    },
+                                                    fontSize = 11.sp
+                                                ),
+                                                maxLines = 1,
+                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                 }
                             }
