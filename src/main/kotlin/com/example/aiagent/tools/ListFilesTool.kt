@@ -103,7 +103,7 @@ class ListFilesTool : Tool(
             if (files.size > maxFiles) {
                 ToolResult.Success(
                     result + mapOf(
-                        "warning" to "文件数量过多，已限制为 $maxFiles 个文件，请按需查询具体目录"
+                        "warning" to "Too many files, limited to $maxFiles files. Please query specific directories as needed."
                     )
                 )
             } else {

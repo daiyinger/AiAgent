@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -625,13 +626,15 @@ fun ChatPanel() {
                     }
                 )
                 
-                // 底部栏：模型选择和发送按钮
+                // 底部栏：系统提示词选择、模型选择和发送按钮
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 服务选择
+                    // 系统提示词选择
+                    SystemPromptSelector(settingsVersion)
+                    
                     // 模型选择
                     ModelSelector(settingsVersion)
                     
@@ -1388,6 +1391,94 @@ private fun ModelSelector(settingsVersion: Int = 0) {
                                 }
                                 
                                 lastProviderId = item.providerId
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SystemPromptSelector(settingsVersion: Int = 0) {
+    key(settingsVersion) {
+        val settings = AiAgentSettings.instance.state
+        var expanded by remember { mutableStateOf(false) }
+        val listState = rememberLazyListState()
+        
+        val currentPromptId = settings.currentSystemPromptId
+        val currentPrompt = settings.systemPrompts.find { it.id == currentPromptId }
+        
+        LaunchedEffect(expanded) {
+            if (expanded && settings.systemPrompts.isNotEmpty()) {
+                val currentIndex = settings.systemPrompts.indexOfFirst { it.id == currentPromptId }
+                if (currentIndex >= 0) {
+                    try {
+                        listState.scrollToItem(currentIndex)
+                    } catch (e: Exception) {
+                    }
+                }
+            }
+        }
+        
+        Box(modifier = Modifier.wrapContentSize(Alignment.BottomStart)) {
+            OutlinedButton(
+                onClick = { expanded = true }
+            ) {
+                Text(currentPrompt?.name ?: "选择提示词")
+            }
+            
+            if (expanded) {
+                Popup(
+                    alignment = Alignment.BottomStart,
+                    onDismissRequest = { expanded = false },
+                    offset = IntOffset(x = 0, y = -4)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(250.dp)
+                            .heightIn(max = 200.dp)
+                            .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
+                            .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                            .padding(4.dp)
+                    ) {
+                        androidx.compose.foundation.lazy.LazyColumn(
+                            modifier = Modifier.fillMaxWidth(),
+                            state = listState
+                        ) {
+                            items(settings.systemPrompts.size) { index ->
+                                val prompt = settings.systemPrompts[index]
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            if (prompt.id == currentPromptId) Color(0xFF3A6B99) else Color.Transparent,
+                                            RoundedCornerShape(4.dp)
+                                        )
+                                        .clickable {
+                                            settings.currentSystemPromptId = prompt.id
+                                            expanded = false
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = prompt.name,
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = if (prompt.id == currentPromptId) Color.White else Color.LightGray,
+                                            fontWeight = if (prompt.id == currentPromptId) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    )
+                                    Text(
+                                        text = prompt.content,
+                                        style = JewelTheme.defaultTextStyle.copy(
+                                            color = if (prompt.id == currentPromptId) Color.White.copy(alpha = 0.7f) else Color.Gray,
+                                            fontSize = 10.sp
+                                        ),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }

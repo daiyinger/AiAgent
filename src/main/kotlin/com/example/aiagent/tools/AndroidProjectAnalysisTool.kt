@@ -6,7 +6,7 @@ import java.nio.file.Path
 
 class AndroidProjectAnalysisTool : Tool(
     name = "analyze_android_project",
-    description = "分析Android项目的结构、依赖和关键文件",
+    description = "Analyze Android project structure, dependencies and key files",
     parameters = listOf(
         ToolParameter(
             name = "path",

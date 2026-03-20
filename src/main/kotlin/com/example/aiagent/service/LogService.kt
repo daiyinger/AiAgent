@@ -71,6 +71,17 @@ class LogService {
         logNetworkMessage("<<< RECEIVE <<<", message)
     }
     
+    fun clearLogs() {
+        try {
+            logFile.delete()
+            logFile.createNewFile()
+            networkLogFile.delete()
+            networkLogFile.createNewFile()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     companion object {
         val instance: LogService get() = ApplicationManager.getApplication().getService(LogService::class.java)
         
@@ -84,6 +95,10 @@ class LogService {
 
         fun logNetworkReceive(message: String) {
             instance.logNetworkReceive(message)
+        }
+
+        fun clearLogs() {
+            instance.clearLogs()
         }
     }
 }

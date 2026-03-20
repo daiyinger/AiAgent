@@ -11,14 +11,14 @@ import com.intellij.openapi.vfs.VirtualFileManager
 import java.io.File
 
 class BuildTool : Tool(
-    name = "build",
-    description = "Build the project using the appropriate build system (Gradle, Maven, etc.)",
+    name = "run_build_task",
+    description = "Run build tasks using the appropriate build system (Gradle, Maven, etc.) for general projects",
     parameters = listOf(
         ToolParameter(
             name = "task",
             type = "string",
-            description = "The build task to run (e.g., 'build', 'compile', 'test'). Default is 'build'",
-            required = false
+            description = "The build task to run (e.g., 'build', 'compile', 'test')",
+            required = true
         )
     )
 ) {
@@ -28,7 +28,7 @@ class BuildTool : Tool(
         onOutput: ((String) -> Unit)?,
         isCancelled: (() -> Boolean)?
     ): ToolResult {
-        val task = params["task"] as? String ?: "build"
+        val task = params["task"] as? String ?: return ToolResult.Error("Missing required parameter: task")
         
         return try {
             val projectBasePath = project.basePath ?: return ToolResult.Error("Project base path not found")

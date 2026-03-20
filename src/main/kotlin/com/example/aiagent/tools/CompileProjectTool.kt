@@ -11,32 +11,32 @@ import java.nio.file.Paths
 import java.util.concurrent.TimeUnit
 
 class CompileProjectTool : Tool(
-    name = "compile_project",
-    description = "Compile Android project",
+    name = "compile_android_project",
+    description = "Compile Android project with Gradle, optimized for Android-specific build tasks",
     parameters = listOf(
         ToolParameter(
             name = "mode",
             type = "string",
             description = "Compile mode: 'build' for full build, 'assemble' for assemble only, 'clean' for clean build",
-            required = false
+            required = true
         ),
         ToolParameter(
             name = "build_type",
             type = "string",
-            description = "Build type: 'debug' or 'release' (default: 'debug')",
-            required = false
+            description = "Build type: 'debug' or 'release'",
+            required = true
         ),
         ToolParameter(
             name = "skip_tests",
             type = "boolean",
-            description = "Skip tests during build (default: true)",
-            required = false
+            description = "Skip tests during build",
+            required = true
         ),
         ToolParameter(
             name = "timeout_minutes",
             type = "number",
-            description = "Timeout in minutes (default: 30)",
-            required = false
+            description = "Timeout in minutes",
+            required = true
         )
     )
 ) {
@@ -50,11 +50,10 @@ class CompileProjectTool : Tool(
         onOutput: ((String) -> Unit)?,
         isCancelled: (() -> Boolean)?
     ): ToolResult {
-        val mode = params["mode"] as? String ?: "build"
-        val buildType = params["build_type"] as? String ?: "debug"
-        // 默认改为 true，Android 编译时跑 Test 极易失败报错
-        val skipTests = params["skip_tests"] as? Boolean ?: true 
-        val timeoutMinutes = (params["timeout_minutes"] as? Number)?.toInt() ?: 30
+        val mode = params["mode"] as? String ?: return ToolResult.Error("Missing required parameter: mode")
+        val buildType = params["build_type"] as? String ?: return ToolResult.Error("Missing required parameter: build_type")
+        val skipTests = params["skip_tests"] as? Boolean ?: return ToolResult.Error("Missing required parameter: skip_tests")
+        val timeoutMinutes = (params["timeout_minutes"] as? Number)?.toInt() ?: return ToolResult.Error("Missing required parameter: timeout_minutes")
 
         return try {
             val basePath = project.basePath ?: return ToolResult.Error("Project base path not found")

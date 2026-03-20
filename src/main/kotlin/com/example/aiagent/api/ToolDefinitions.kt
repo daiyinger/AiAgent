@@ -38,20 +38,20 @@ object ToolDefinitions {
     }
 
     /**
-     * 获取工具定义的文本描述（用于系统提示）
+     * Get tool definitions text description (for system prompt)
      */
     fun getToolsDescription(): String {
-        return ToolManager.getAllTools().joinToString("\n\n") { tool ->
+        return ToolManager.getAllTools().joinToString("\n") { tool ->
             buildString {
-                appendLine("工具: ${tool.name}")
-                appendLine("描述: ${tool.description}")
+                append("${tool.name}")
                 if (tool.parameters.isNotEmpty()) {
-                    appendLine("参数:")
-                    tool.parameters.forEach { param ->
-                        val required = if (param.required) " (必需)" else " (可选)"
-                        appendLine("  - ${param.name} (${param.type}): ${param.description}$required")
-                    }
+                    val params = tool.parameters.map { param ->
+                        val required = if (param.required) "*" else ""
+                        "${param.name}$required"
+                    }.joinToString(", ")
+                    append("($params)")
                 }
+                append(": ${tool.description}")
             }
         }
     }

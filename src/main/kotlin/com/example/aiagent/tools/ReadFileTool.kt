@@ -16,19 +16,19 @@ class ReadFileTool : Tool(
         ToolParameter(
             name = "start_line",
             type = "integer",
-            description = "起始行号（从1开始）。如果不指定，则从第1行开始",
+            description = "Starting line number (1-based). If not specified, starts from line 1",
             required = false
         ),
         ToolParameter(
             name = "end_line",
             type = "integer",
-            description = "结束行号。如果不指定，则读取到文件末尾或达到max_lines限制",
+            description = "Ending line number. If not specified, reads to end of file or until max_lines limit",
             required = false
         ),
         ToolParameter(
             name = "max_lines",
             type = "integer",
-            description = "最多读取的行数。如果不指定，则读取指定范围内的所有行",
+            description = "Maximum number of lines to read. If not specified, reads all lines in the specified range",
             required = false
         )
     )

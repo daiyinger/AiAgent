@@ -790,12 +790,251 @@ fun SettingsPanel(
         }
         
         item {
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+        
+        item {
+            Text(
+                "系统提示词管理",
+                style = JewelTheme.defaultTextStyle.copy(
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            )
+        }
+        
+        item {
+            var newPromptName by remember { mutableStateOf(TextFieldValue("")) }
+            var newPromptContent by remember { mutableStateOf(TextFieldValue("")) }
+            var editingPromptId by remember { mutableStateOf<String?>(null) }
+            var editingPromptName by remember { mutableStateOf(TextFieldValue("")) }
+            var editingPromptContent by remember { mutableStateOf(TextFieldValue("")) }
+            
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (settings.systemPrompts.isNotEmpty()) {
+                    settings.systemPrompts.forEach { prompt ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (prompt.id == settings.currentSystemPromptId) Color(0xFF3A6B99) else Color.Transparent
+                                )
+                                .border(
+                                    1.dp,
+                                    if (prompt.id == settings.currentSystemPromptId) Color(0xFF3A6B99) else Color.Gray,
+                                    RoundedCornerShape(4.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    prompt.name,
+                                    style = JewelTheme.defaultTextStyle.copy(
+                                        color = if (prompt.id == settings.currentSystemPromptId) Color.White else Color.White,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                                Text(
+                                    prompt.content,
+                                    style = JewelTheme.defaultTextStyle.copy(
+                                        color = if (prompt.id == settings.currentSystemPromptId) Color.White.copy(alpha = 0.7f) else Color.LightGray,
+                                        fontSize = 11.sp
+                                    ),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (editingPromptId == prompt.id) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            val promptIndex = settings.systemPrompts.indexOfFirst { it.id == prompt.id }
+                                            if (promptIndex >= 0) {
+                                                settings.systemPrompts[promptIndex].name = editingPromptName.text
+                                                settings.systemPrompts[promptIndex].content = editingPromptContent.text
+                                            }
+                                            editingPromptId = null
+                                        }
+                                    ) {
+                                        Text("保存", fontSize = 10.sp)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            editingPromptId = null
+                                        }
+                                    ) {
+                                        Text("取消", fontSize = 10.sp)
+                                    }
+                                } else {
+                                    OutlinedButton(
+                                        onClick = {
+                                            settings.currentSystemPromptId = prompt.id
+                                        }
+                                    ) {
+                                        Text("选择", fontSize = 10.sp)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            editingPromptId = prompt.id
+                                            editingPromptName = TextFieldValue(prompt.name)
+                                            editingPromptContent = TextFieldValue(prompt.content)
+                                        }
+                                    ) {
+                                        Text("编辑", fontSize = 10.sp)
+                                    }
+                                    if (!prompt.isDefault) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                settings.systemPrompts.removeIf { it.id == prompt.id }
+                                                if (settings.currentSystemPromptId == prompt.id) {
+                                                    settings.currentSystemPromptId = settings.systemPrompts.firstOrNull()?.id ?: ""
+                                                }
+                                            }
+                                        ) {
+                                            Text("删除", fontSize = 10.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (editingPromptId == prompt.id) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text("名称:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
+                                androidx.compose.foundation.text.BasicTextField(
+                                    value = editingPromptName,
+                                    onValueChange = { editingPromptName = it },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                        .background(JewelTheme.globalColors.panelBackground),
+                                    singleLine = true,
+                                    textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
+                                    cursorBrush = SolidColor(Color.White)
+                                )
+                                
+                                Text("内容:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
+                                androidx.compose.foundation.text.BasicTextField(
+                                    value = editingPromptContent,
+                                    onValueChange = { editingPromptContent = it },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(80.dp)
+                                        .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                        .background(JewelTheme.globalColors.panelBackground),
+                                    textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
+                                    cursorBrush = SolidColor(Color.White)
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text("添加新系统提示词:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("名称:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = newPromptName,
+                            onValueChange = { newPromptName = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .background(JewelTheme.globalColors.panelBackground),
+                            singleLine = true,
+                            textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
+                            cursorBrush = SolidColor(Color.White),
+                            decorationBox = { innerTextField ->
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    if (newPromptName.text.isEmpty()) {
+                                        Text(
+                                            text = "输入提示词名称",
+                                            style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            }
+                        )
+                    }
+                }
+                
+                Column {
+                    Text("内容:", style = JewelTheme.defaultTextStyle.copy(color = Color.White))
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = newPromptContent,
+                        onValueChange = { newPromptContent = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp)
+                            .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .background(JewelTheme.globalColors.panelBackground),
+                        textStyle = JewelTheme.defaultTextStyle.copy(color = Color.White),
+                        cursorBrush = SolidColor(Color.White),
+                        decorationBox = { innerTextField ->
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                if (newPromptContent.text.isEmpty()) {
+                                    Text(
+                                        text = "输入系统提示词内容",
+                                        style = JewelTheme.defaultTextStyle.copy(color = Color.LightGray)
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        }
+                    )
+                }
+                
+                OutlinedButton(
+                    onClick = {
+                        if (newPromptName.text.isNotEmpty() && newPromptContent.text.isNotEmpty()) {
+                            val newPrompt = AiAgentSettings.SystemPrompt(
+                                id = java.util.UUID.randomUUID().toString(),
+                                name = newPromptName.text,
+                                content = newPromptContent.text,
+                                isDefault = false
+                            )
+                            settings.systemPrompts.add(newPrompt)
+                            newPromptName = TextFieldValue("")
+                            newPromptContent = TextFieldValue("")
+                        }
+                    },
+                    enabled = newPromptName.text.isNotEmpty() && newPromptContent.text.isNotEmpty()
+                ) {
+                    Text("添加系统提示词")
+                }
+            }
+        }
+        
+        item {
             Spacer(modifier = Modifier.height(8.dp))
         }
         
         item {
             Text(
-                "提示：设置会在关闭对话框时自动保存。支持多个Provider配置。",
+                "提示：设置会在关闭对话框时自动保存。支持多个Provider配置和系统提示词管理。",
                 style = JewelTheme.defaultTextStyle.copy(color = Color.Gray, fontSize = 11.sp)
             )
         }

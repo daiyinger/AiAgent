@@ -91,6 +91,10 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
             timestamp = System.currentTimeMillis()
         )
         state.sessions.add(newSession)
+        
+        // 清除日志文件，从头开始写日志
+        com.example.aiagent.service.LogService.clearLogs()
+        
         return newSession
     }
     

@@ -24,11 +24,11 @@ class CreateDirectoryTool : Tool(
         onOutput: ((String) -> Unit)?,
         isCancelled: (() -> Boolean)?
     ): ToolResult {
-        val path = params["path"] as? String ?: return ToolResult.Error("缺少必要参数: path")
+        val path = params["path"] as? String ?: return ToolResult.Error("Missing required parameter: path")
 
         return try {
             val resolvedPath = resolveFilePath(project, path)
-                ?: return ToolResult.Error("无效路径: $path")
+                ?: return ToolResult.Error("Invalid path: $path")
 
             val file = resolvedPath.toFile()
 
@@ -39,14 +39,14 @@ class CreateDirectoryTool : Tool(
                 val canonicalProjectPath = File(projectBasePath).canonicalPath
                 if (canonicalFilePath == null || canonicalProjectPath == null ||
                     !canonicalFilePath.startsWith(canonicalProjectPath)) {
-                    return ToolResult.Error("不能在项目目录外创建目录")
+                    return ToolResult.Error("Cannot create directory outside of project directory")
                 }
             }
 
             // 检查路径是否已存在
             if (file.exists()) {
                 if (file.isDirectory) {
-                    onOutput?.invoke("ℹ️ 目录已存在: $path")
+                    onOutput?.invoke("ℹ️ Directory already exists: $path")
                     return ToolResult.Success(
                         mapOf(
                             "path" to path,
@@ -56,17 +56,17 @@ class CreateDirectoryTool : Tool(
                         )
                     )
                 } else {
-                    return ToolResult.Error("路径已存在且不是目录: $path")
+                    return ToolResult.Error("Path already exists and is not a directory: $path")
                 }
             }
 
-            onOutput?.invoke("📁 创建目录: $path...")
+            onOutput?.invoke("📁 Creating directory: $path...")
 
             // 创建目录（包括所有不存在的父目录）
             val created = file.mkdirs()
 
             if (created) {
-                onOutput?.invoke("✅ 成功创建目录: ${file.name}")
+                onOutput?.invoke("✅ Successfully created directory: ${file.name}")
                 ToolResult.Success(
                     mapOf(
                         "path" to path,
@@ -76,10 +76,10 @@ class CreateDirectoryTool : Tool(
                     )
                 )
             } else {
-                ToolResult.Error("创建目录失败: $path")
+                ToolResult.Error("Failed to create directory: $path")
             }
         } catch (e: Exception) {
-            ToolResult.Error("创建目录时出错: ${e.message}")
+            ToolResult.Error("Error creating directory: ${e.message}")
         }
     }
 }

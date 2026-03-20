@@ -909,18 +909,35 @@ class LangChainAgentService(private val project: Project) {
 
         return buildList {
             // 系统提示（精简版）
-            add(ChatMessage.System(buildOptimizedSystemPrompt(embedToolsInPrompt)))
+            val (systemPrompt, systemPromptTokens) = buildOptimizedSystemPrompt(embedToolsInPrompt, modelName, currentMessage)
+            add(ChatMessage.System(systemPrompt))
+            
+            // 记录系统提示词的token数量
+            log("System prompt tokens: $systemPromptTokens")
 
             // 历史消息（已优化）
+            var lastMessageType: String? = null
             selectedHistory.forEach { msg ->
                 when (msg.type) {
-                    "user" -> add(ChatMessage.User(msg.content))
-                    "ai" -> add(ChatMessage.Assistant(msg.content))
+                    "user" -> {
+                        if (lastMessageType != "user") {
+                            add(ChatMessage.User(msg.content))
+                            lastMessageType = "user"
+                        }
+                    }
+                    "ai" -> {
+                        if (lastMessageType != "ai") {
+                            add(ChatMessage.Assistant(msg.content))
+                            lastMessageType = "ai"
+                        }
+                    }
                 }
             }
 
             // 当前消息
-            add(ChatMessage.User(currentMessage))
+            if (lastMessageType != "user") {
+                add(ChatMessage.User(currentMessage))
+            }
         }.toMutableList()
     }
 
@@ -929,61 +946,117 @@ class LangChainAgentService(private val project: Project) {
      * FC 模式：工具定义通过 API tools 参数传递，提示只需概要
      * 非 FC 模式：需要在提示中嵌入详细的工具说明和调用格式
      */
-    private fun buildOptimizedSystemPrompt(embedToolsInPrompt: Boolean = false): String {
+    private fun buildOptimizedSystemPrompt(embedToolsInPrompt: Boolean = false, modelName: String = "default", userMessage: String? = null): Pair<String, Int> {
+        val settings = AiAgentSettings.instance.state
+        val currentPrompt = settings.systemPrompts.find { it.id == settings.currentSystemPromptId }
+        val userSystemPrompt = currentPrompt?.content ?: ""
+        
+        var systemPrompt: String
+        
         if (!embedToolsInPrompt) {
-            // FC 模式：工具定义已通过 API 传递
-            val allTools = ToolDefinitions.getAllTools()
-            val toolNames = allTools.joinToString(", ") { it.function.name }
+            // 动态加载与用户消息相关的工具
+            val relevantTools = getRelevantTools(userMessage)
+            val toolNames = relevantTools.joinToString(", ") { it.function.name }
             
-            return """
-                你是 Android Studio 专家，擅长分析和修改项目。
+            val toolsInfo = "\n\nAvailable tools: $toolNames\nCompilation advice: assemble(fast) > build(complete) > clean(rebuild)"
+            
+            systemPrompt = if (userSystemPrompt.isNotEmpty()) {
+                "$userSystemPrompt$toolsInfo"
+            } else {
+                toolsInfo
+            }
+        } else {
+            // 动态加载与用户消息相关的工具
+            val relevantTools = getRelevantTools(userMessage)
+            val toolsDetailDesc = getMinimalToolsDescription(relevantTools)
+            
+            val toolsInfo = """
 
-                行为规则：
-                1. 需要信息时直接调用工具，不要先描述你打算做什么
-                2. 拿到工具结果后，如果还需要更多信息，继续调用工具
-                3. 有足够信息后，直接给出完整的最终回答
-                4. 路径用相对路径，修改文件前先读取内容
-                5. 不要说"我来帮你..."或"让我先..."这样的过渡语句，直接行动
-
-                可用工具: $toolNames
-                编译建议: assemble(快速) > build(完整) > clean(清理后重新)
-            """.trimIndent()
-        }
-
-        // 非 FC 模式：嵌入完整工具定义和调用格式说明
-        val toolsDetailDesc = ToolDefinitions.getToolsDescription()
-        return """
-            你是 Android Studio 专家，擅长分析和修改项目。
-
-            行为规则：
-            1. 需要信息时直接输出工具调用DSL，不要先描述你打算做什么
-            2. 拿到工具结果后，如果还需要更多信息，继续输出工具调用
-            3. 有足够信息后，直接给出完整的最终回答
-            4. 路径用相对路径，修改文件前先读取内容
-            5. 不要说"我来帮你..."或"让我先..."这样的过渡语句，直接行动
-
-            编译建议: assemble(快速) > build(完整) > clean(清理后重新)
-
-            你拥有以下工具：
+            You have the following tools:
             $toolsDetailDesc
 
-            当你需要使用工具时，请严格按照以下 DSL 格式输出（不要输出其他格式）：
+            When you need to use a tool, please output in the following DSL format strictly (do not output other formats):
             <｜DSML｜function_calls>
-            <｜DSML｜invoke name="工具名称">
+            <｜DSML｜invoke name="tool name">
             <｜DSML｜function_call>
             <arguments>
-            <argument name="参数名">参数值</argument>
+            <argument name="parameter name">parameter value</argument>
             </arguments>
             </｜DSML｜function_call>
             </｜DSML｜invoke>
             </｜DSML｜function_calls>
 
-            重要提示：
-            - 每次只输出一个工具调用
-            - 工具名称必须是上面列出的名称之一
-            - 参数值不需要引号
-            - 你可以连续调用多个工具来完成复杂任务
+            Important notes:
+            - Output only one tool call at a time
+            - The tool name must be one of the names listed above
+            - Parameter values do not need quotes
+            - You can call multiple tools consecutively to complete complex tasks
         """.trimIndent()
+        
+            systemPrompt = if (userSystemPrompt.isNotEmpty()) {
+                "$userSystemPrompt$toolsInfo"
+            } else {
+                toolsInfo
+            }
+        }
+        
+        val tokenCount = TokenOptimizer.countTokens(systemPrompt, modelName)
+        return Pair(systemPrompt, tokenCount)
+    }
+
+    /**
+     * 根据用户消息获取相关的工具
+     */
+    private fun getRelevantTools(userMessage: String?): List<ToolDefinition> {
+        if (userMessage.isNullOrEmpty()) {
+            return ToolDefinitions.getAllTools()
+        }
+
+        val allTools = ToolDefinitions.getAllTools()
+        val relevantTools = mutableListOf<ToolDefinition>()
+
+        // 工具关键词映射
+        val toolKeywords = mapOf(
+            "read_file" to listOf("read", "file", "view", "see", "content"),
+            "edit_file" to listOf("edit", "modify", "change", "update", "file"),
+            "delete_file" to listOf("delete", "remove", "file"),
+            "search_files" to listOf("search", "find", "locate", "file"),
+            "list_files" to listOf("list", "files", "directory", "folder"),
+            "create_directory" to listOf("create", "directory", "folder", "mkdir"),
+            "compile_project" to listOf("compile", "build", "assemble", "gradle"),
+            "build" to listOf("build", "compile", "assemble", "gradle"),
+            "analyze_android_project" to listOf("analyze", "android", "project", "structure"),
+            "web_search" to listOf("search", "web", "internet", "information"),
+            "get_current_time" to listOf("time", "date", "current", "now")
+        )
+
+        // 检查用户消息中是否包含工具相关的关键词
+        for (tool in allTools) {
+            val keywords = toolKeywords[tool.function.name] ?: emptyList()
+            if (keywords.any { keyword -> userMessage.lowercase().contains(keyword) }) {
+                relevantTools.add(tool)
+            }
+        }
+
+        // 如果没有找到相关工具，返回所有工具
+        return if (relevantTools.isNotEmpty()) relevantTools else allTools
+    }
+
+    /**
+     * 获取最小化的工具描述
+     */
+    private fun getMinimalToolsDescription(tools: List<ToolDefinition>): String {
+        return tools.joinToString("\n") { tool ->
+            buildString {
+                append("${tool.function.name}")
+                val required = tool.function.parameters.required
+                if (required != null && required.isNotEmpty()) {
+                    val requiredParams = required.joinToString(", ")
+                    append("($requiredParams)")
+                }
+                append(": ${tool.function.description}")
+            }
+        }
     }
 
     /**

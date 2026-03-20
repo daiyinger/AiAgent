@@ -10,14 +10,14 @@ import com.intellij.openapi.vfs.VirtualFile
 
 class EditFileTool : Tool(
     name = "edit_file",
-    description = "Edit a file by replacing a specific portion of its content. Ensure 'old_text' is unique in the file.",
+    description = "Edit a file by replacing a specific portion of its content. STRONGLY RECOMMENDED: Use start_line and end_line for precise line-level replacement instead of old_text, which often fails due to whitespace/indentation differences.",
     parameters = listOf(
-         ToolParameter(name = "path", type = "string", description = "...", required = true),
+         ToolParameter(name = "path", type = "string", description = "The file path to edit", required = true),
         ToolParameter(name = "new_text", type = "string", description = "The new code to insert", required = true),
         // 将 old_text 改为非必填，或者作为备用选项
-        ToolParameter(name = "old_text", type = "string", description = "The exact text to replace. (Optional if start_line and end_line are provided)", required = false),
-        ToolParameter(name = "start_line", type = "integer", description = "The starting line number (1-based) to replace.", required = false),
-        ToolParameter(name = "end_line", type = "integer", description = "The ending line number (1-based) to replace.", required = false)
+        ToolParameter(name = "old_text", type = "string", description = "The exact text to replace. (Optional if start_line and end_line are provided) WARNING: old_text often fails due to whitespace/indentation differences.", required = false),
+        ToolParameter(name = "start_line", type = "integer", description = "The starting line number (1-based) to replace. RECOMMENDED: Use this with end_line for precise replacement.", required = false),
+        ToolParameter(name = "end_line", type = "integer", description = "The ending line number (1-based) to replace. RECOMMENDED: Use this with start_line for precise replacement.", required = false)
     )
 ) {
     private fun log(message: String) = LogService.log("[EditFileTool] $message")
