@@ -39,10 +39,7 @@ class EditFileTool : Tool(
         val startLine = (params["start_line"] as? Number)?.toInt()
         val endLine = (params["end_line"] as? Number)?.toInt()
         
-        // 确保至少提供了 old_text 或行号
-        if (oldText == null && (startLine == null || endLine == null)) {
-            return ToolResult.Error("Missing required parameter: either 'old_text' or both 'start_line' and 'end_line' must be provided")
-        }
+        // 暂时跳过参数验证，因为文件可能不存在（创建新文件）
 
         log("开始执行编辑文件操作")
         log("参数: path=$path")
@@ -106,6 +103,11 @@ class EditFileTool : Tool(
 
         log("handleExistingFile: startLine=$startLine, endLine=$endLine, oldText=${oldText?.take(30)}...")
 
+        // 确保至少提供了 old_text 或行号
+        if (oldText == null && (startLine == null || endLine == null)) {
+            return ToolResult.Error("Missing required parameter: either 'old_text' or both 'start_line' and 'end_line' must be provided")
+        }
+
         return try {
             if (startLine != null && endLine != null && startLine > 0 && endLine > 0) {
                 // =============== 方案 A：基于行号精确替换 ===============
@@ -130,8 +132,8 @@ class EditFileTool : Tool(
                 log("行号替换成功")
                 
                 val startLineText = "Replaced lines $startLine to $endLine"
-                val oldLineCount = 0
-                val newLineCount = 0
+                val oldLineCount = endLine - startLine + 1
+                val newLineCount = newText.lines().size
                 val startLineNumber = startLine
                 
                 buildSuccessResult(path, startLineText, newText, oldLineCount, newLineCount, startLineNumber)

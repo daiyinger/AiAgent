@@ -198,6 +198,18 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
         }
     }
     
+    fun updateMessageTokenUsage(messageId: String, inputTokens: Int, outputTokens: Int) {
+        val currentSessionState = currentSession
+        if (currentSessionState != null) {
+            val msgIndex = currentSessionState.messages.indexOfFirst { it.id == messageId && it.type == "ai" }
+            if (msgIndex >= 0) {
+                currentSessionState.messages[msgIndex].inputTokens = inputTokens
+                currentSessionState.messages[msgIndex].outputTokens = outputTokens
+                currentSessionState.messages[msgIndex].totalTokens = inputTokens + outputTokens
+            }
+        }
+    }
+    
     fun clearCurrentSessionMessages() {
         currentSession?.messages?.clear()
     }

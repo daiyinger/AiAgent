@@ -34,6 +34,7 @@ object ToolManager {
         registerTool(CompileProjectTool())
         registerTool(WebSearchTool())
         registerTool(GetCurrentTimeTool())
+        registerTool(ShellCommandTool())
     }
 
     private fun registerTool(tool: Tool) {

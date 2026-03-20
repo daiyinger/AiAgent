@@ -970,15 +970,7 @@ fun ChatPanel() {
                                                         scrollState.scrollTo(scrollState.maxValue)
                                                         
                                                         // 更新 ChatStateService 中的 token 统计信息
-                                                        val currentSession = chatStateService.currentSession
-                                                        if (currentSession != null) {
-                                                            val aiMessageState = currentSession.messages.lastOrNull { it.type == "ai" }
-                                                            if (aiMessageState != null) {
-                                                                aiMessageState.inputTokens = inputTokens
-                                                                aiMessageState.outputTokens = outputTokens
-                                                                aiMessageState.totalTokens = inputTokens + outputTokens
-                                                            }
-                                                        }
+                                                        chatStateService.updateMessageTokenUsage(aiMessage.id, inputTokens, outputTokens)
                                                     }
                                                 }
                                             },
@@ -1044,14 +1036,8 @@ fun ChatPanel() {
                                                 chatStateService.setLastAiMessageGenerating(false)
                                                 
                                                 // 更新 ChatStateService 中的 token 统计信息
-                                                val currentSession = chatStateService.currentSession
-                                                if (currentSession != null) {
-                                                    val aiMessageState = currentSession.messages.lastOrNull { it.type == "ai" }
-                                                    if (aiMessageState != null && tokenUsage != null) {
-                                                        aiMessageState.inputTokens = tokenUsage.first
-                                                        aiMessageState.outputTokens = tokenUsage.second
-                                                        aiMessageState.totalTokens = tokenUsage.first + tokenUsage.second
-                                                    }
+                                                if (tokenUsage != null) {
+                                                    chatStateService.updateMessageTokenUsage(aiMessageId, tokenUsage.first, tokenUsage.second)
                                                 }
                                             }
                                             
@@ -1785,10 +1771,21 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                             if ((message.toolName == "editFile" || message.toolName == "edit_file") && !message.isExecuting) {
                                 val oldText = message.parameters["old_text"] as? String
                                 val newText = message.parameters["new_text"] as? String
-                                if (oldText != null && newText != null) {
-                                    val diffLines = computeDiff(oldText, newText)
-                                    val addCount = diffLines.count { it.type == DiffType.ADD }
-                                    val deleteCount = diffLines.count { it.type == DiffType.DELETE }
+                                if (newText != null) {
+                                    var addCount = 0
+                                    var deleteCount = 0
+                                    
+                                    // 处理空字符串或null的特殊情况（新文件）
+                                    if (oldText == null || oldText.isBlank()) {
+                                        // 新文件，只计算新增行数
+                                        addCount = newText.lines().filter { it.isNotEmpty() }.size
+                                        deleteCount = 0
+                                    } else {
+                                        // 现有文件，计算差异
+                                        val diffLines = computeDiff(oldText, newText)
+                                        addCount = diffLines.count { it.type == DiffType.ADD }
+                                        deleteCount = diffLines.count { it.type == DiffType.DELETE }
+                                    }
                                     
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -1840,10 +1837,21 @@ private fun ToolCallMessageItem(message: ToolCallMessage, scrollState: androidx.
                         // 当没有文件名时，行数变化占满剩余空间
                         val oldText = message.parameters["old_text"] as? String
                         val newText = message.parameters["new_text"] as? String
-                        if (oldText != null && newText != null) {
-                            val diffLines = computeDiff(oldText, newText)
-                            val addCount = diffLines.count { it.type == DiffType.ADD }
-                            val deleteCount = diffLines.count { it.type == DiffType.DELETE }
+                        if (newText != null) {
+                            var addCount = 0
+                            var deleteCount = 0
+                            
+                            // 处理空字符串或null的特殊情况（新文件）
+                            if (oldText == null || oldText.isBlank()) {
+                                // 新文件，只计算新增行数
+                                addCount = newText.lines().filter { it.isNotEmpty() }.size
+                                deleteCount = 0
+                            } else {
+                                // 现有文件，计算差异
+                                val diffLines = computeDiff(oldText, newText)
+                                addCount = diffLines.count { it.type == DiffType.ADD }
+                                deleteCount = diffLines.count { it.type == DiffType.DELETE }
+                            }
                             
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
