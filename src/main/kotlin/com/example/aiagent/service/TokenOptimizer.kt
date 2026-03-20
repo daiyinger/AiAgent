@@ -48,7 +48,7 @@ object TokenOptimizer {
         return try {
             when {
                 modelName.contains("gpt-4o", ignoreCase = true) ->
-                    registry.getEncoding(EncodingType.O200K_BASE)
+                    registry.getEncoding(EncodingType.CL100K_BASE)
                 modelName.contains("gpt-4", ignoreCase = true) ->
                     registry.getEncoding(EncodingType.CL100K_BASE)
                 modelName.contains("gpt-3.5", ignoreCase = true) ->

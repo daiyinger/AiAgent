@@ -6,6 +6,8 @@ import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.URLEncoder
 import java.net.UnknownHostException
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
 
 /**
  * 联网搜索工具 - 支持多个搜索引擎自动切换
@@ -30,11 +32,11 @@ class WebSearchTool : Tool(
 ) {
     // 搜索引擎列表，按优先级排序
     private val searchEngines = listOf(
+        SearchEngine("360搜索", ::search360),
         SearchEngine("百度", ::searchBaidu),
         SearchEngine("Google", ::searchGoogle),
         SearchEngine("Bing", ::searchBing),
-        SearchEngine("搜狗", ::searchSogou),
-        SearchEngine("360搜索", ::search360)
+        SearchEngine("搜狗", ::searchSogou)
     )
 
     override suspend fun execute(
@@ -112,22 +114,26 @@ class WebSearchTool : Tool(
         try {
             connection.inputStream.bufferedReader().use { reader ->
                 val html = reader.readText()
+                val doc = Jsoup.parse(html)
 
-                // 百度搜索结果解析
-                val resultPattern = Regex(
-                    "<div class=\"result c-container \"[^>]*>.*?<h3[^>]*>.*?<a[^>]*href=\"([^\"]*)\"[^>]*>(.*?)</a>.*?</h3>.*?<div class=\"c-abstract\"[^>]*>(.*?)</div>.*?</div>",
-                    RegexOption.DOT_MATCHES_ALL
-                )
+                // 查找百度搜索结果
+                val resultElements = doc.select(".result.c-container")
 
-                val matches = resultPattern.findAll(html)
+                for (element in resultElements.take(maxResults)) {
+                    // 提取标题和链接
+                    val titleElement = element.selectFirst("h3 a")
+                    val title = titleElement?.text() ?: ""
+                    var url = titleElement?.attr("href") ?: ""
 
-                for (match in matches.take(maxResults)) {
-                    var url = match.groupValues[1].trim()
-                    val title = cleanHtml(match.groupValues[2])
-                    val snippet = cleanHtml(match.groupValues[3])
+                    // 提取摘要
+                    val summaryElement = element.selectFirst(".c-abstract") ?: element.selectFirst(".summary")
+                    val snippet = summaryElement?.text() ?: ""
 
-                    // 百度链接需要处理跳转
+                    // 处理百度跳转链接
                     if (url.startsWith("http://www.baidu.com/link?url=")) {
+                        url = url.substringAfter("url=").substringBefore("&")
+                    }
+                    if (url.startsWith("https://www.baidu.com/link?url=")) {
                         url = url.substringAfter("url=").substringBefore("&")
                     }
 
@@ -163,19 +169,25 @@ class WebSearchTool : Tool(
         try {
             connection.inputStream.bufferedReader().use { reader ->
                 val html = reader.readText()
+                val doc = Jsoup.parse(html)
 
-                // Google 搜索结果解析
-                val resultPattern = Regex(
-                    "<div[^>]*class=\"g\"[^>]*>.*?<h3[^>]*>.*?<a[^>]*href=\"([^\"]*)\"[^>]*>(.*?)</a>.*?</h3>.*?<div[^>]*class=\"VwiC3b\"[^>]*>(.*?)</div>.*?</div>",
-                    RegexOption.DOT_MATCHES_ALL
-                )
+                // 查找Google搜索结果
+                val resultElements = doc.select(".g")
 
-                val matches = resultPattern.findAll(html)
+                for (element in resultElements.take(maxResults)) {
+                    // 提取标题和链接
+                    val titleElement = element.selectFirst("h3 a")
+                    val title = titleElement?.text() ?: ""
+                    var url = titleElement?.attr("href") ?: ""
 
-                for (match in matches.take(maxResults)) {
-                    val url = match.groupValues[1].trim()
-                    val title = cleanHtml(match.groupValues[2])
-                    val snippet = cleanHtml(match.groupValues[3])
+                    // 提取摘要
+                    val snippetElement = element.selectFirst(".VwiC3b") ?: element.selectFirst(".s")
+                    val snippet = snippetElement?.text() ?: ""
+
+                    // 处理Google跳转链接
+                    if (url.startsWith("/url?q=")) {
+                        url = url.substringAfter("/url?q=").substringBefore("&")
+                    }
 
                     if (title.isNotBlank() && url.isNotBlank() && !url.contains("google.com")) {
                         results.add(
@@ -209,19 +221,20 @@ class WebSearchTool : Tool(
         try {
             connection.inputStream.bufferedReader().use { reader ->
                 val html = reader.readText()
+                val doc = Jsoup.parse(html)
 
-                // Bing 搜索结果解析
-                val resultPattern = Regex(
-                    "<li class=\"b_algo\"[^>]*>.*?<h2[^>]*>.*?<a[^>]*href=\"([^\"]*)\"[^>]*>(.*?)</a>.*?</h2>.*?<p[^>]*>(.*?)</p>.*?</li>",
-                    RegexOption.DOT_MATCHES_ALL
-                )
+                // 查找Bing搜索结果
+                val resultElements = doc.select(".b_algo")
 
-                val matches = resultPattern.findAll(html)
+                for (element in resultElements.take(maxResults)) {
+                    // 提取标题和链接
+                    val titleElement = element.selectFirst("h2 a")
+                    val title = titleElement?.text() ?: ""
+                    val url = titleElement?.attr("href") ?: ""
 
-                for (match in matches.take(maxResults)) {
-                    val url = match.groupValues[1].trim()
-                    val title = cleanHtml(match.groupValues[2])
-                    val snippet = cleanHtml(match.groupValues[3])
+                    // 提取摘要
+                    val snippetElement = element.selectFirst("p")
+                    val snippet = snippetElement?.text() ?: ""
 
                     if (title.isNotBlank() && url.isNotBlank() && !url.contains("bing.com")) {
                         results.add(
@@ -255,19 +268,20 @@ class WebSearchTool : Tool(
         try {
             connection.inputStream.bufferedReader().use { reader ->
                 val html = reader.readText()
+                val doc = Jsoup.parse(html)
 
-                // 搜狗搜索结果解析
-                val resultPattern = Regex(
-                    "<div class=\"vrwrap\"[^>]*>.*?<h3[^>]*>.*?<a[^>]*href=\"([^\"]*)\"[^>]*>(.*?)</a>.*?</h3>.*?<p[^>]*class=\"str\"[^>]*>(.*?)</p>.*?</div>",
-                    RegexOption.DOT_MATCHES_ALL
-                )
+                // 查找搜狗搜索结果
+                val resultElements = doc.select(".vrwrap")
 
-                val matches = resultPattern.findAll(html)
+                for (element in resultElements.take(maxResults)) {
+                    // 提取标题和链接
+                    val titleElement = element.selectFirst("h3 a")
+                    val title = titleElement?.text() ?: ""
+                    var url = titleElement?.attr("href") ?: ""
 
-                for (match in matches.take(maxResults)) {
-                    var url = match.groupValues[1].trim()
-                    val title = cleanHtml(match.groupValues[2])
-                    val snippet = cleanHtml(match.groupValues[3])
+                    // 提取摘要
+                    val snippetElement = element.selectFirst(".str")
+                    val snippet = snippetElement?.text() ?: ""
 
                     // 搜狗链接需要处理跳转
                     if (url.startsWith("/link?")) {
@@ -306,19 +320,20 @@ class WebSearchTool : Tool(
         try {
             connection.inputStream.bufferedReader().use { reader ->
                 val html = reader.readText()
+                val doc = Jsoup.parse(html)
 
-                // 360 搜索结果解析
-                val resultPattern = Regex(
-                    "<li class=\"res-list\"[^>]*>.*?<h3[^>]*>.*?<a[^>]*href=\"([^\"]*)\"[^>]*>(.*?)</a>.*?</h3>.*?<p class=\"res-desc\"[^>]*>(.*?)</p>.*?</li>",
-                    RegexOption.DOT_MATCHES_ALL
-                )
+                // 查找360搜索结果
+                val resultElements = doc.select(".res-list")
 
-                val matches = resultPattern.findAll(html)
+                for (element in resultElements.take(maxResults)) {
+                    // 提取标题和链接
+                    val titleElement = element.selectFirst("h3 a")
+                    val title = titleElement?.text() ?: ""
+                    val url = titleElement?.attr("href") ?: ""
 
-                for (match in matches.take(maxResults)) {
-                    val url = match.groupValues[1].trim()
-                    val title = cleanHtml(match.groupValues[2])
-                    val snippet = cleanHtml(match.groupValues[3])
+                    // 提取摘要
+                    val snippetElement = element.selectFirst(".res-desc")
+                    val snippet = snippetElement?.text() ?: ""
 
                     if (title.isNotBlank() && url.isNotBlank()) {
                         results.add(
