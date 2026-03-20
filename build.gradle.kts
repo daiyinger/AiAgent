@@ -36,6 +36,12 @@ dependencies {
     // HTTP 客户端（使用 Java 原生 HttpURLConnection，无需额外依赖）
     // JSON 处理
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.19.2")
+    
+    // Token 计算库
+    implementation("com.knuddels:jtokkit:1.0.0")
+    
+    // HTML 解析库
+    implementation("org.jsoup:jsoup:1.17.2")
 }
 
 intellijPlatform {
