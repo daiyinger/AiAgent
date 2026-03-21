@@ -19,6 +19,10 @@ class EditFileTool : Tool(
         - Line numbers are 1-based (first line is line 1)
         - To insert new lines, set start_line = end_line + 1 (e.g., to insert after line 5, use start_line=6, end_line=5)
         
+        IMPORTANT: After each edit, the file's line numbers may change. Always use the returned 
+        'total_lines' and 'new_end_line' from the previous edit result to calculate line numbers 
+        for subsequent edits.
+        
         Example:
         - Replace lines 10-15: start_line=10, end_line=15, new_text="new code here"
         - Insert after line 10: start_line=11, end_line=10, new_text="inserted line"
@@ -178,12 +182,14 @@ class EditFileTool : Tool(
         val oldLineCount = if (oldText.isEmpty()) 0 else oldText.lines().size
         val newLineCount = newText.lines().size
         val lineChange = newLineCount - oldLineCount
+        val totalLinesAfter = document.lineCount
+        val newEndLine = actualStartLine + newLineCount - 1
 
         return ToolResult.Success(
             mapOf(
                 "path" to path,
                 "success" to true,
-                "message" to buildChangeMessage(lineChange, isInsertion),
+                "message" to buildChangeMessage(lineChange, isInsertion, actualStartLine, newEndLine, totalLinesAfter),
                 "old_text" to oldText,
                 "new_text" to newText,
                 "start_line" to actualStartLine,
@@ -191,7 +197,9 @@ class EditFileTool : Tool(
                 "old_line_count" to oldLineCount,
                 "new_line_count" to newLineCount,
                 "line_change" to lineChange,
-                "is_insertion" to isInsertion
+                "is_insertion" to isInsertion,
+                "total_lines" to totalLinesAfter,
+                "new_end_line" to newEndLine
             )
         )
     }
@@ -252,17 +260,19 @@ class EditFileTool : Tool(
                 "new_line_count" to newLineCount,
                 "line_change" to newLineCount,
                 "is_insertion" to false,
-                "is_new_file" to true
+                "is_new_file" to true,
+                "total_lines" to newLineCount,
+                "new_end_line" to newLineCount
             )
         )
     }
 
-    private fun buildChangeMessage(lineChange: Int, isInsertion: Boolean): String {
+    private fun buildChangeMessage(lineChange: Int, isInsertion: Boolean, startLine: Int, newEndLine: Int, totalLines: Int): String {
         return when {
-            isInsertion -> "Inserted ${if (lineChange > 0) "$lineChange lines" else "content"}"
-            lineChange > 0 -> "Added $lineChange lines"
-            lineChange < 0 -> "Removed ${-lineChange} lines"
-            else -> "No line change"
+            isInsertion -> "Inserted $lineChange lines at line $startLine. File now has $totalLines lines. New content ends at line $newEndLine."
+            lineChange > 0 -> "Replaced lines $startLine-$newEndLine (+$lineChange lines). File now has $totalLines lines."
+            lineChange < 0 -> "Replaced lines $startLine-$newEndLine (${lineChange} lines). File now has $totalLines lines."
+            else -> "Replaced lines $startLine-$newEndLine (no line change). File has $totalLines lines."
         }
     }
 }
