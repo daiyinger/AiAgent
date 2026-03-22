@@ -26,6 +26,7 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
         var content: String = "",
         var timestamp: String = "",
         var toolName: String = "",
+        var toolCallId: String = "",  // 用于tool类型消息，存储关联的tool_call_id
         var parameters: Map<String, String> = emptyMap(),
         var isExecuting: Boolean = false,
         var result: String? = null,
@@ -35,7 +36,8 @@ class ChatStateService : PersistentStateComponent<ChatStateService.State> {
         var outputTokens: Int = 0,
         var totalTokens: Int = 0,
         var modelName: String? = null,
-        var reasoningContent: String = ""
+        var reasoningContent: String = "",
+        var toolCallsJson: String = ""  // 用于ai类型消息，存储tool_calls的JSON字符串
     )
     
     data class State(

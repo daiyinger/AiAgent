@@ -39,6 +39,7 @@ import com.example.aiagent.service.toLocalDateTime
 import com.example.aiagent.service.toStateString
 import com.example.aiagent.settings.AiAgentSettings
 import com.example.aiagent.tools.ToolResult
+import com.example.aiagent.api.ToolCall
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.project.ProjectManager
@@ -2458,7 +2459,8 @@ data class AiMessage(
     var isGenerating: Boolean = false,
     var tokenUsage: Pair<Int, Int>? = null,
     var modelName: String? = null,
-    var reasoningContent: String = ""
+    var reasoningContent: String = "",
+    var toolCalls: List<ToolCall> = emptyList()  // 添加toolCalls字段
 ) : ChatMessage(id, content, timestamp)
 
 // 工具调用消息
@@ -2484,7 +2486,29 @@ fun ChatStateService.MessageState.toChatMessage(): ChatMessage {
     val dateTime = if (timestamp.isNotEmpty()) timestamp.toLocalDateTime() else LocalDateTime.now()
     return when (type) {
         "user" -> UserMessage(id, content, dateTime)
-        "ai" -> AiMessage(id, content, dateTime, isGenerating, if (inputTokens > 0 || outputTokens > 0) Pair(inputTokens, outputTokens) else null, modelName, reasoningContent)
+        "ai" -> {
+            // 反序列化toolCallsJson
+            val toolCalls: List<ToolCall> = if (toolCallsJson.isNotEmpty()) {
+                try {
+                    com.example.aiagent.api.OpenAiClient.objectMapper.readValue(toolCallsJson, Array<ToolCall>::class.java).toList()
+                } catch (e: Exception) {
+                    emptyList()
+                }
+            } else {
+                emptyList()
+            }
+            
+            AiMessage(
+                id = id,
+                content = content,
+                timestamp = dateTime,
+                isGenerating = isGenerating,
+                tokenUsage = if (inputTokens > 0 || outputTokens > 0) Pair(inputTokens, outputTokens) else null,
+                modelName = modelName,
+                reasoningContent = reasoningContent,
+                toolCalls = toolCalls
+            )
+        }
         "tool" -> ToolCallMessage(
             id = id,
             toolName = toolName,
@@ -2513,28 +2537,117 @@ fun ChatMessage.toMessageState(): ChatStateService.MessageState {
             content = content,
             timestamp = timestamp.toStateString()
         )
-        is AiMessage -> ChatStateService.MessageState(
-            id = id,
-            type = "ai",
-            content = content,
-            timestamp = timestamp.toStateString(),
-            isGenerating = isGenerating,
-            inputTokens = tokenUsage?.first ?: 0,
-            outputTokens = tokenUsage?.second ?: 0,
-            totalTokens = (tokenUsage?.first ?: 0) + (tokenUsage?.second ?: 0),
-            modelName = modelName,
-            reasoningContent = reasoningContent
-        )
-        is ToolCallMessage -> ChatStateService.MessageState(
-            id = id,
-            type = "tool",
-            timestamp = timestamp.toStateString(),
-            toolName = toolName,
-            parameters = parameters.mapValues { it.toString() },
-            isExecuting = isExecuting,
-            result = result,
-            output = output
-        )
+        is AiMessage -> {
+            // 将toolCalls序列化为JSON字符串
+            val toolCallsJson = if (toolCalls.isNotEmpty()) {
+                try {
+                    com.example.aiagent.api.OpenAiClient.objectMapper.writeValueAsString(toolCalls)
+                } catch (e: Exception) {
+                    ""
+                }
+            } else {
+                ""
+            }
+            
+            ChatStateService.MessageState(
+                id = id,
+                type = "ai",
+                content = content,
+                timestamp = timestamp.toStateString(),
+                isGenerating = isGenerating,
+                inputTokens = tokenUsage?.first ?: 0,
+                outputTokens = tokenUsage?.second ?: 0,
+                totalTokens = (tokenUsage?.first ?: 0) + (tokenUsage?.second ?: 0),
+                modelName = modelName,
+                reasoningContent = reasoningContent,
+                toolCallsJson = toolCallsJson  // 保存tool_calls的JSON
+            )
+        }
+        is ToolCallMessage -> {
+            // 根据工具类型采用不同的输出处理策略
+            val processedOutput = when {
+                // 文件读取：只保留摘要，不保存完整内容
+                toolName == "read_file" || toolName == "readFile" -> {
+                    if (output.length > 500) {
+                        val lines = output.lines()
+                        val summary = buildString {
+                            appendLine("文件内容 [共 ${lines.size} 行]")
+                            // 保留前10行和后5行
+                            if (lines.size > 15) {
+                                appendLine("--- 前10行 ---")
+                                lines.take(10).forEach { appendLine(it) }
+                                appendLine("... [中间省略 ${lines.size - 15} 行] ...")
+                                appendLine("--- 后5行 ---")
+                                lines.takeLast(5).forEach { appendLine(it) }
+                            } else {
+                                lines.forEach { appendLine(it) }
+                            }
+                        }
+                        summary
+                    } else {
+                        output
+                    }
+                }
+                // 文件编辑：保留diff信息，但限制长度
+                toolName == "edit_file" || toolName == "editFile" -> {
+                    if (output.length > 1500) {
+                        output.take(1500) + "\n... [diff已截断，原长度 ${output.length} 字符]"
+                    } else {
+                        output
+                    }
+                }
+                // 编译/构建：只保留关键信息（错误和最后部分）
+                toolName == "compile_project" || toolName == "compileProject" || 
+                toolName == "build" || toolName == "assemble" -> {
+                    if (output.length > 1000) {
+                        val lines = output.lines()
+                        val errorLines = lines.filter { 
+                            it.contains("error", ignoreCase = true) || 
+                            it.contains("failed", ignoreCase = true) ||
+                            it.contains("FAILURE", ignoreCase = true) ||
+                            it.contains("FAILED", ignoreCase = true)
+                        }
+                        val lastLines = lines.takeLast(20)
+                        
+                        buildString {
+                            if (errorLines.isNotEmpty()) {
+                                appendLine("=== 错误信息 ===")
+                                errorLines.take(10).forEach { appendLine(it) }
+                                if (errorLines.size > 10) {
+                                    appendLine("... [还有 ${errorLines.size - 10} 个错误] ...")
+                                }
+                                appendLine()
+                            }
+                            appendLine("=== 最后20行输出 ===")
+                            lastLines.forEach { appendLine(it) }
+                            appendLine()
+                            appendLine("[已截断，原输出共 ${lines.size} 行，${output.length} 字符]")
+                        }
+                    } else {
+                        output
+                    }
+                }
+                // 其他工具：通用截断
+                else -> {
+                    if (output.length > 2000) {
+                        output.take(2000) + "\n... [已截断，原长度 ${output.length} 字符]"
+                    } else {
+                        output
+                    }
+                }
+            }
+            
+            ChatStateService.MessageState(
+                id = id,
+                type = "tool",
+                timestamp = timestamp.toStateString(),
+                toolName = toolName,
+                parameters = parameters.mapValues { it.toString() },
+                isExecuting = isExecuting,
+                result = result,
+                output = processedOutput
+            )
+        }
         is TokenUsageMessage -> ChatStateService.MessageState(
             id = id,
             type = "token",

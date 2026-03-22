@@ -401,8 +401,25 @@ class ContextManager {
     private fun ChatStateService.MessageState.toChatMessage(): ChatMessage {
         return when (type) {
             "user" -> ChatMessage.User(content)
-            "ai" -> ChatMessage.Assistant(content, reasoningContent = reasoningContent)
-            "tool" -> ChatMessage.Tool(toolCallId = id, name = toolName, content = output)
+            "ai" -> {
+                // 解析toolCallsJson，恢复tool_calls信息
+                val toolCalls = if (toolCallsJson.isNotEmpty()) {
+                    try {
+                        OpenAiClient.objectMapper.readValue(toolCallsJson, Array<ToolCall>::class.java).toList()
+                    } catch (e: Exception) {
+                        log("解析toolCallsJson失败: ${e.message}")
+                        log("toolCallsJson内容: ${toolCallsJson.take(200)}")
+                        emptyList()
+                    }
+                } else {
+                    emptyList()
+                }
+                if (toolCalls.isNotEmpty()) {
+                    log("恢复了 ${toolCalls.size} 个tool_calls，ID: ${toolCalls.map { it.id }}")
+                }
+                ChatMessage.Assistant(content, toolCalls = toolCalls, reasoningContent = reasoningContent)
+            }
+            "tool" -> ChatMessage.Tool(toolCallId = toolCallId, name = toolName, content = output)
             else -> ChatMessage.User(content)
         }
     }

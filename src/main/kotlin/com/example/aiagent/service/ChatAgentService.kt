@@ -359,15 +359,10 @@ class ChatAgentService(private val project: Project) {
 
                 log("第 $round 轮收到 ${resolvedToolCalls.size} 个工具调用")
 
-                // 添加 AI 响应（含 tool calls 和 reasoning_content）到消息历史
-                val reasoningContent = reasoningContentBuffer.toString().ifEmpty { null }
-                currentMessages.add(ChatMessage.Assistant(
-                    content = roundResponse.toString(),
-                    toolCalls = resolvedToolCalls,
-                    reasoningContent = reasoningContent
-                ))
-
-                // 执行所有工具调用
+                // 先执行所有工具调用，收集结果
+                val executedToolCalls = mutableListOf<ToolCall>()
+                val toolResults = mutableListOf<Pair<ToolCall, String>>()
+                
                 for (toolCall in resolvedToolCalls) {
                     if (isCancelled.get()) {
                         log("检测到取消，停止执行工具调用")
@@ -375,21 +370,41 @@ class ChatAgentService(private val project: Project) {
                     }
 
                     val resultContent = executeToolCall(toolCall, onToolCall, onToolOutput)
+                    executedToolCalls.add(toolCall)
+                    toolResults.add(Pair(toolCall, resultContent))
 
                     if (isCancelled.get()) {
                         log("工具执行完成后检测到取消，停止执行")
                         break
                     }
-
-                    val truncatedResult = if (resultContent.length > MAX_TOOL_RESULT_LENGTH) {
-                        resultContent.take(MAX_TOOL_RESULT_LENGTH) + "\n... [已截断，原长度 ${resultContent.length}]"
-                    } else resultContent
-
-                    currentMessages.add(ChatMessage.Tool(
-                        toolCallId = toolCall.id,
-                        name = toolCall.function.name,
-                        content = truncatedResult
+                }
+                
+                // 只有成功执行的工具调用才添加到消息历史
+                // 确保Assistant消息中的toolCalls与Tool消息的toolCallId完全一致
+                if (executedToolCalls.isNotEmpty()) {
+                    val reasoningContent = reasoningContentBuffer.toString().ifEmpty { null }
+                    currentMessages.add(ChatMessage.Assistant(
+                        content = roundResponse.toString(),
+                        toolCalls = executedToolCalls,
+                        reasoningContent = reasoningContent
                     ))
+                    
+                    // 添加Tool消息
+                    for ((toolCall, resultContent) in toolResults) {
+                        val truncatedResult = if (resultContent.length > MAX_TOOL_RESULT_LENGTH) {
+                            resultContent.take(MAX_TOOL_RESULT_LENGTH) + "\n... [已截断，原长度 ${resultContent.length}]"
+                        } else resultContent
+
+                        currentMessages.add(ChatMessage.Tool(
+                            toolCallId = toolCall.id,
+                            name = toolCall.function.name,
+                            content = truncatedResult
+                        ))
+                    }
+                } else {
+                    // 如果没有工具被成功执行，但有工具调用请求，可能是取消导致的
+                    // 在这种情况下，不添加Assistant消息，避免消息序列不一致
+                    log("没有工具被成功执行，跳过添加Assistant消息")
                 }
 
                 // 继续下一轮：模型根据工具结果决定是否继续调用工具或给出最终回答
