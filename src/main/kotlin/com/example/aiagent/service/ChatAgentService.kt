@@ -1,6 +1,8 @@
 package com.example.aiagent.service
 
 import com.example.aiagent.api.*
+import com.example.aiagent.exceptions.AiAgentException
+import com.example.aiagent.exceptions.ExceptionUtils
 import com.example.aiagent.settings.AiAgentSettings
 import com.example.aiagent.tools.ToolManager
 import com.example.aiagent.tools.ToolResult
@@ -18,6 +20,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * AI Agent 服务
  * 支持流式响应、Token 优化、智能历史管理
+ * 
+ * 重构说明：
+ * - 消息处理逻辑移至 MessageProcessor
+ * - 工具调用逻辑移至 ToolCallHandler
+ * - 性能监控使用 PerformanceMonitor
  */
 class ChatAgentService(private val project: Project) {
 
@@ -26,8 +33,6 @@ class ChatAgentService(private val project: Project) {
         private const val MAX_TOOL_ROUNDS = 60
         /** 截断续传最大次数（finish_reason=length 时自动继续） */
         private const val MAX_CONTINUATION_ROUNDS = 5
-        /** 最大历史消息数（保留最近 N 条） */
-        private const val MAX_HISTORY_MESSAGES = 20
         /** 单条消息最大字符数 */
         private const val MAX_MESSAGE_LENGTH = 10240
         /** 工具结果截断长度 */
@@ -35,6 +40,10 @@ class ChatAgentService(private val project: Project) {
     }
 
     private fun log(message: String) = LogService.log(message)
+    
+    // 处理器实例
+    private val messageProcessor = MessageProcessor()
+    private val toolCallHandler = ToolCallHandler(project)
 
     private var currentJob: Job? = null
     private val isCancelled = AtomicBoolean(false)
@@ -410,10 +419,17 @@ class ChatAgentService(private val project: Project) {
             }
 
             Result.success(Unit)
-        } catch (e: Throwable) {
+        } catch (e: AiAgentException) {
+            log("发送消息错误: ${e.javaClass.simpleName}: ${e.message}")
+            log(ExceptionUtils.formatForLog(e))
+            Result.failure(e)
+        } catch (e: Exception) {
             log("发送消息错误: ${e.javaClass.simpleName}: ${e.message}")
             e.printStackTrace()
-            Result.failure(e)
+            Result.failure(AiAgentException.NetworkException(
+                "Failed to send message: ${e.message}",
+                cause = e
+            ))
         }
     }
 
@@ -865,80 +881,13 @@ class ChatAgentService(private val project: Project) {
 
     /**
      * 构建优化的消息列表（Token 优化）
-     * 使用TokenOptimizer进行精确的token计算和智能历史选择
+     * 委托给 MessageProcessor 处理
      */
     private fun buildOptimizedMessageList(
         currentMessage: String,
         embedToolsInPrompt: Boolean = false
     ): MutableList<ChatMessage> {
-        val chatStateService = ChatStateService.instance
-        val history = chatStateService.currentSession?.messages ?: emptyList()
-        val settings = AiAgentSettings.instance.state
-        val modelName = settings.currentModel
-
-        // 检测是否为编程模式
-        val isProgrammingMode = currentMessage.contains("code") || 
-                               currentMessage.contains("编程") ||
-                               currentMessage.contains("代码") ||
-                               currentMessage.contains("function") ||
-                               currentMessage.contains("class") ||
-                               currentMessage.contains("文件") ||
-                               currentMessage.contains("编译") ||
-                               currentMessage.contains("优化") ||
-                               currentMessage.contains("完善")
-
-        // 使用TokenOptimizer智能选择历史消息
-        val selectedHistory = TokenOptimizer.selectHistoryMessages(
-            history = history,
-            currentMessage = currentMessage,
-            modelName = modelName,
-            maxHistoryMessages = MAX_HISTORY_MESSAGES,
-            isProgrammingMode = isProgrammingMode
-        )
-
-        // 计算token统计
-        val currentTokens = TokenOptimizer.countTokens(currentMessage, modelName)
-        val historyTokens = selectedHistory.sumOf {
-            TokenOptimizer.countTokens(it.content, modelName)
-        }
-        val modelLimit = TokenOptimizer.getModelTokenLimit(modelName)
-
-        log("Token优化 - 模型: $modelName, 限制: $modelLimit")
-        log("历史消息: ${history.size} 条 -> 智能选择后 ${selectedHistory.size} 条")
-        log("Token使用 - 当前消息: $currentTokens, 历史消息: $historyTokens, 总计: ${currentTokens + historyTokens}")
-
-        return buildList {
-            // 系统提示（精简版）
-            val (systemPrompt, systemPromptTokens) = buildOptimizedSystemPrompt(embedToolsInPrompt, modelName, currentMessage)
-            add(ChatMessage.System(systemPrompt))
-            
-            // 记录系统提示词的token数量
-            log("System prompt tokens: $systemPromptTokens")
-
-            // 历史消息（已优化）
-            var lastMessageType: String? = null
-            selectedHistory.forEach { msg ->
-                when (msg.type) {
-                    "user" -> {
-                        if (lastMessageType != "user") {
-                            add(ChatMessage.User(msg.content))
-                            lastMessageType = "user"
-                        }
-                    }
-                    "ai" -> {
-                        if (lastMessageType != "ai") {
-                            add(ChatMessage.Assistant(msg.content))
-                            lastMessageType = "ai"
-                        }
-                    }
-                }
-            }
-
-            // 当前消息
-            if (lastMessageType != "user") {
-                add(ChatMessage.User(currentMessage))
-            }
-        }.toMutableList()
+        return messageProcessor.buildOptimizedMessageList(currentMessage, embedToolsInPrompt)
     }
 
     /**
@@ -1122,7 +1071,7 @@ class ChatAgentService(private val project: Project) {
             log("测试连接成功: ${response.content.take(50)}...")
             true
         } catch (e: Exception) {
-            log("测试连接失败: ${e.message}")
+            log("测试连接失败: ${ExceptionUtils.formatForLog(e)}")
             false
         }
     }

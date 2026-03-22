@@ -1,5 +1,6 @@
 package com.example.aiagent.tools
 
+import com.example.aiagent.exceptions.AiAgentException
 import com.example.aiagent.service.LogService
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -80,16 +81,16 @@ class EditFileTool : Tool(
         isCancelled: (() -> Boolean)?
     ): ToolResult {
         val path = params["path"] as? String
-            ?: return ToolResult.Error("Missing required parameter: path")
+            ?: throw AiAgentException.ValidationException("Missing required parameter: path", "path")
         
         val newText = (params["new_text"] as? String)?.replace("\r\n", "\n")
-            ?: return ToolResult.Error("Missing required parameter: new_text")
+            ?: throw AiAgentException.ValidationException("Missing required parameter: new_text", "new_text")
         
         val startLine = (params["start_line"] as? Number)?.toInt()
-            ?: return ToolResult.Error("Missing required parameter: start_line")
+            ?: throw AiAgentException.ValidationException("Missing required parameter: start_line", "start_line")
         
         val endLine = (params["end_line"] as? Number)?.toInt()
-            ?: return ToolResult.Error("Missing required parameter: end_line")
+            ?: throw AiAgentException.ValidationException("Missing required parameter: end_line", "end_line")
 
         val checksum = params["checksum"] as? String
         val expectedOldText = params["expected_old_text"] as? String
@@ -102,16 +103,22 @@ class EditFileTool : Tool(
         log("预期旧文本: ${if (expectedOldText != null) "已提供 (${expectedOldText.length}字符)" else "未提供"}")
 
         if (startLine < 1) {
-            return ToolResult.Error("start_line must be >= 1, got $startLine")
+            throw AiAgentException.ValidationException(
+                "start_line must be >= 1, got $startLine",
+                parameterName = "start_line"
+            )
         }
 
         if (endLine < startLine - 1) {
-            return ToolResult.Error("end_line must be >= start_line - 1, got end_line=$endLine, start_line=$startLine")
+            throw AiAgentException.ValidationException(
+                "end_line must be >= start_line - 1, got end_line=$endLine, start_line=$startLine",
+                parameterName = "end_line"
+            )
         }
 
         return try {
             val resolvedPath = resolveFilePath(project, path)
-                ?: return ToolResult.Error("Project base path not found")
+                ?: throw AiAgentException.ConfigurationException("Project base path not found")
 
             log("解析后路径: $resolvedPath")
             val virtualFile = findVirtualFile(resolvedPath)
@@ -123,10 +130,16 @@ class EditFileTool : Tool(
                 log("文件不存在，创建新文件")
                 createNewFile(project, path, newText)
             }
+        } catch (e: AiAgentException) {
+            throw e
         } catch (e: Exception) {
             log("编辑失败: ${e.message}")
             log("堆栈: ${e.stackTraceToString()}")
-            ToolResult.Error("Error editing file: ${e.message}")
+            throw AiAgentException.FileOperationException(
+                "Error editing file: ${e.message}",
+                filePath = path,
+                cause = e
+            )
         }
     }
 
@@ -151,10 +164,11 @@ class EditFileTool : Tool(
         if (expectedChecksum != null) {
             if (!verifyChecksum(currentContent, expectedChecksum)) {
                 val currentChecksum = computeContentChecksum(currentContent)
-                return ToolResult.Error(
+                throw AiAgentException.FileOperationException(
                     "File checksum mismatch! File may have been modified since last read. " +
                     "Expected: ${expectedChecksum.take(16)}..., Got: ${currentChecksum.take(16)}... " +
-                    "Please re-read the file to get the current content and checksum."
+                    "Please re-read the file to get the current content and checksum.",
+                    filePath = path
                 )
             }
             log("校验和验证通过 ✓")
@@ -170,10 +184,11 @@ class EditFileTool : Tool(
                 log("旧文本验证失败!")
                 log("期望: ${expectedOldText.take(100)}...")
                 log("实际: ${actualOldText.take(100)}...")
-                return ToolResult.Error(
+                throw AiAgentException.FileOperationException(
                     "Content mismatch at lines $startLine-$endLine! " +
                     "Expected text doesn't match actual content. " +
-                    "The file may have been modified. Please re-read the file to verify current content."
+                    "The file may have been modified. Please re-read the file to verify current content.",
+                    filePath = path
                 )
             }
             log("旧文本验证通过 ✓")
@@ -186,7 +201,10 @@ class EditFileTool : Tool(
 
         if (isInsertion) {
             if (startLine > lineCount + 1) {
-                return ToolResult.Error("Cannot insert at line $startLine: file only has $lineCount lines")
+                throw AiAgentException.FileOperationException(
+                    "Cannot insert at line $startLine: file only has $lineCount lines",
+                    filePath = path
+                )
             }
             
             actualStartLine = startLine
@@ -211,10 +229,16 @@ class EditFileTool : Tool(
             log("插入成功")
         } else {
             if (startLine > lineCount) {
-                return ToolResult.Error("start_line ($startLine) exceeds file length ($lineCount lines)")
+                throw AiAgentException.FileOperationException(
+                    "start_line ($startLine) exceeds file length ($lineCount lines)",
+                    filePath = path
+                )
             }
             if (endLine > lineCount) {
-                return ToolResult.Error("end_line ($endLine) exceeds file length ($lineCount lines)")
+                throw AiAgentException.FileOperationException(
+                    "end_line ($endLine) exceeds file length ($lineCount lines)",
+                    filePath = path
+                )
             }
 
             actualStartLine = startLine
@@ -300,7 +324,10 @@ class EditFileTool : Tool(
                 log("创建文件异常: ${e.message}")
                 null
             }
-        } ?: return ToolResult.Error("Failed to create file: $path")
+        } ?: throw AiAgentException.FileOperationException(
+            "Failed to create file: $path",
+            filePath = path
+        )
 
         val newLineCount = newText.lines().size
 

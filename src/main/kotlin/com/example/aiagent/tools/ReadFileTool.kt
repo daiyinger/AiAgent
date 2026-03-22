@@ -1,5 +1,6 @@
 package com.example.aiagent.tools
 
+import com.example.aiagent.exceptions.AiAgentException
 import com.intellij.openapi.project.Project
 import java.nio.charset.Charset
 
@@ -39,23 +40,33 @@ class ReadFileTool : Tool(
         onOutput: ((String) -> Unit)?,
         isCancelled: (() -> Boolean)?
     ): ToolResult {
-        val path = params["path"] as? String ?: return ToolResult.Error("Missing required parameter: path")
+        val path = params["path"] as? String 
+            ?: throw AiAgentException.ValidationException("Missing required parameter: path", "path")
 
         return try {
             val resolvedPath = resolveFilePath(project, path)
-                ?: return ToolResult.Error("Project base path not found")
+                ?: throw AiAgentException.ConfigurationException("Project base path not found")
 
             println("ReadFileTool - Resolved path: $resolvedPath")
 
             val virtualFile = findVirtualFile(resolvedPath)
-                ?: return ToolResult.Error("File not found: $path (resolved: $resolvedPath)")
+                ?: throw AiAgentException.FileOperationException(
+                    "File not found: $path (resolved: $resolvedPath)",
+                    filePath = path
+                )
 
             if (!virtualFile.exists()) {
-                return ToolResult.Error("File does not exist: $path")
+                throw AiAgentException.FileOperationException(
+                    "File does not exist: $path",
+                    filePath = path
+                )
             }
 
             if (virtualFile.isDirectory) {
-                return ToolResult.Error("Cannot read directory: $path")
+                throw AiAgentException.FileOperationException(
+                    "Cannot read directory: $path",
+                    filePath = path
+                )
             }
 
             val fullContent = String(virtualFile.contentsToByteArray(), Charset.forName("UTF-8"))
@@ -135,8 +146,14 @@ class ReadFileTool : Tool(
                     )
                 )
             )
+        } catch (e: AiAgentException) {
+            throw e
         } catch (e: Exception) {
-            ToolResult.Error("Error reading file: ${e.message}")
+            throw AiAgentException.FileOperationException(
+                "Error reading file: ${e.message}",
+                filePath = path,
+                cause = e
+            )
         }
     }
 }
