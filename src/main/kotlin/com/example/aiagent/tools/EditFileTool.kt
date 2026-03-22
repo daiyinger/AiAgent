@@ -19,13 +19,18 @@ class EditFileTool : Tool(
         - Line numbers are 1-based (first line is line 1)
         - To insert new lines, set start_line = end_line + 1 (e.g., to insert after line 5, use start_line=6, end_line=5)
         
+        SAFETY FEATURES:
+        - checksum: Optional SHA-256 hash to verify file hasn't changed since last read
+        - expected_old_text: Optional text that should be at the edit location (validates before replacing)
+        
         IMPORTANT: After each edit, the file's line numbers may change. Always use the returned 
         'total_lines' and 'new_end_line' from the previous edit result to calculate line numbers 
         for subsequent edits.
         
-        Example:
+        Examples:
         - Replace lines 10-15: start_line=10, end_line=15, new_text="new code here"
         - Insert after line 10: start_line=11, end_line=10, new_text="inserted line"
+        - Safe edit with checksum: path="src/Main.kt", start_line=10, end_line=10, new_text="new", checksum="abc123"
     """.trimIndent(),
     parameters = listOf(
         ToolParameter(
@@ -51,6 +56,18 @@ class EditFileTool : Tool(
             type = "integer",
             description = "Ending line number (1-based). For insertion, use end_line=start_line-1",
             required = true
+        ),
+        ToolParameter(
+            name = "checksum",
+            type = "string",
+            description = "Optional SHA-256 checksum from previous read_file to verify file hasn't changed",
+            required = false
+        ),
+        ToolParameter(
+            name = "expected_old_text",
+            type = "string",
+            description = "Optional: Expected text at the edit location. Edit will fail if content doesn't match.",
+            required = false
         )
     )
 ) {
@@ -74,10 +91,15 @@ class EditFileTool : Tool(
         val endLine = (params["end_line"] as? Number)?.toInt()
             ?: return ToolResult.Error("Missing required parameter: end_line")
 
+        val checksum = params["checksum"] as? String
+        val expectedOldText = params["expected_old_text"] as? String
+
         log("=== 开始编辑文件 ===")
         log("路径: $path")
         log("起始行: $startLine, 结束行: $endLine")
         log("新文本长度: ${newText.length}")
+        log("校验和: ${checksum?.take(16) ?: "未提供"}...")
+        log("预期旧文本: ${if (expectedOldText != null) "已提供 (${expectedOldText.length}字符)" else "未提供"}")
 
         if (startLine < 1) {
             return ToolResult.Error("start_line must be >= 1, got $startLine")
@@ -96,7 +118,7 @@ class EditFileTool : Tool(
 
             if (virtualFile != null && virtualFile.exists()) {
                 log("文件存在，执行编辑")
-                editExistingFile(project, virtualFile, path, startLine, endLine, newText)
+                editExistingFile(project, virtualFile, path, startLine, endLine, newText, checksum, expectedOldText)
             } else {
                 log("文件不存在，创建新文件")
                 createNewFile(project, path, newText)
@@ -114,13 +136,48 @@ class EditFileTool : Tool(
         path: String,
         startLine: Int,
         endLine: Int,
-        newText: String
+        newText: String,
+        expectedChecksum: String?,
+        expectedOldText: String?
     ): ToolResult {
         val document = FileDocumentManager.getInstance().getDocument(virtualFile)
             ?: return ToolResult.Error("Cannot get document for file: $path")
 
+        val currentContent = document.text
         val lineCount = document.lineCount
         log("文件总行数: $lineCount")
+
+        // 验证校验和（如果提供）
+        if (expectedChecksum != null) {
+            if (!verifyChecksum(currentContent, expectedChecksum)) {
+                val currentChecksum = computeContentChecksum(currentContent)
+                return ToolResult.Error(
+                    "File checksum mismatch! File may have been modified since last read. " +
+                    "Expected: ${expectedChecksum.take(16)}..., Got: ${currentChecksum.take(16)}... " +
+                    "Please re-read the file to get the current content and checksum."
+                )
+            }
+            log("校验和验证通过 ✓")
+        }
+
+        // 验证预期旧文本（如果提供）
+        if (expectedOldText != null && endLine >= startLine) {
+            val startOffset = document.getLineStartOffset(startLine - 1)
+            val endOffset = document.getLineEndOffset(endLine - 1)
+            val actualOldText = document.getText(com.intellij.openapi.util.TextRange.create(startOffset, endOffset))
+            
+            if (actualOldText.trim() != expectedOldText.trim()) {
+                log("旧文本验证失败!")
+                log("期望: ${expectedOldText.take(100)}...")
+                log("实际: ${actualOldText.take(100)}...")
+                return ToolResult.Error(
+                    "Content mismatch at lines $startLine-$endLine! " +
+                    "Expected text doesn't match actual content. " +
+                    "The file may have been modified. Please re-read the file to verify current content."
+                )
+            }
+            log("旧文本验证通过 ✓")
+        }
 
         val isInsertion = endLine == startLine - 1
         val oldText: String

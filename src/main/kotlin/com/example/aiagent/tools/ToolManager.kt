@@ -25,6 +25,7 @@ object ToolManager {
     private fun registerTools() {
         registerTool(ReadFileTool())
         registerTool(EditFileTool())
+        registerTool(PreviewEditTool())  // 新增：编辑预览工具
         registerTool(DeleteFileTool())
         registerTool(CreateDirectoryTool())
         registerTool(BuildTool())

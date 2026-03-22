@@ -6,6 +6,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import java.io.File
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.security.MessageDigest
 
 abstract class Tool(
     val name: String,
@@ -76,6 +77,26 @@ abstract class Tool(
     protected fun findVirtualFile(project: Project, rawPath: String): VirtualFile? {
         val resolved = resolveFilePath(project, rawPath) ?: return null
         return findVirtualFile(resolved)
+    }
+
+    /**
+     * 计算内容的校验和（SHA-256）
+     * 用于检测文件在读取和编辑之间是否被修改
+     */
+    protected fun computeContentChecksum(content: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hashBytes = digest.digest(content.toByteArray(Charsets.UTF_8))
+        return hashBytes.joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * 验证文件校验和
+     * @return true 如果校验和匹配或未提供预期校验和
+     */
+    protected fun verifyChecksum(currentContent: String, expectedChecksum: String?): Boolean {
+        if (expectedChecksum == null) return true
+        val currentChecksum = computeContentChecksum(currentContent)
+        return currentChecksum == expectedChecksum
     }
 }
 

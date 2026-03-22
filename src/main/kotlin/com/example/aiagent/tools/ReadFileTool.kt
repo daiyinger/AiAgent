@@ -94,12 +94,25 @@ class ReadFileTool : Tool(
                 emptyList()
             }
             
-            // 生成带行号的内容
+            // 生成带行号的内容（保持向后兼容）
             val selectedContent = selectedLines.mapIndexed { index, line ->
                 val actualLineNumber = actualStartLine + index
                 "$actualLineNumber. $line"
             }.joinToString("\n")
             val actualReadLineCount = selectedLines.size
+
+            // 计算文件内容校验和
+            val fullContentChecksum = computeContentChecksum(fullContent)
+
+            // 生成结构化的行数据（便于 AI 精确编辑）
+            val structuredLines = selectedLines.mapIndexed { index, line ->
+                val lineNumber = actualStartLine + index
+                mapOf(
+                    "number" to lineNumber,
+                    "content" to line,
+                    "indent" to line.takeWhile { it == ' ' || it == '\t' }.length
+                )
+            }
 
             ToolResult.Success(
                 mapOf(
@@ -109,7 +122,17 @@ class ReadFileTool : Tool(
                     "lineCount" to totalLineCount,
                     "actualStartLine" to actualStartLine,
                     "actualEndLine" to actualEndLine,
-                    "actualReadLineCount" to actualReadLineCount
+                    "actualReadLineCount" to actualReadLineCount,
+                    // 新增：文件校验和
+                    "checksum" to fullContentChecksum,
+                    // 新增：结构化行数据
+                    "lines" to structuredLines,
+                    // 新增：文件元信息
+                    "fileInfo" to mapOf(
+                        "totalLines" to totalLineCount,
+                        "readRange" to "$actualStartLine-$actualEndLine",
+                        "encoding" to "UTF-8"
+                    )
                 )
             )
         } catch (e: Exception) {
