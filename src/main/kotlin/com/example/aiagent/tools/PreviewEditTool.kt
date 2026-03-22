@@ -215,53 +215,51 @@ class PreviewEditTool : Tool(
         contextLines: Int
     ): String {
         val diffBuilder = StringBuilder()
-
-        // 计算上下文范围
-        val contextStart = (startLine - contextLines - 1).coerceAtLeast(0)
-        val contextEnd = if (oldEndLine >= startLine) {
-            (oldEndLine + contextLines).coerceAtMost(oldLines.size)
-        } else {
-            (startLine + contextLines).coerceAtMost(oldLines.size)
+        val isInsertion = oldEndLine == startLine - 1
+        
+        // 计算上下文范围（修正后的逻辑）
+        val editStartIndex = startLine - 1  // 0-based 起始索引
+        val editEndIndex = if (isInsertion) editStartIndex else oldEndLine - 1  // 0-based 结束索引
+        
+        // 前导上下文：从编辑区域前 contextLines 行开始
+        val contextStartIndex = (editStartIndex - contextLines).coerceAtLeast(0)
+        // 后续上下文：到编辑区域后 contextLines 行结束
+        val contextEndIndex = (editEndIndex + contextLines + 1).coerceAtMost(oldLines.size)
+        
+        // 添加前导上下文（编辑区域之前的行）
+        for (i in contextStartIndex until editStartIndex) {
+            val lineNum = i + 1
+            diffBuilder.appendLine("  $lineNum| ${oldLines[i]}")
         }
-
-        // 添加前导上下文
-        if (contextStart > 0) {
-            diffBuilder.appendLine("... (省略 ${contextStart} 行)")
-        }
-
-        for (i in contextEnd downTo contextStart) {
-            if (i < startLine - 1 || (oldEndLine >= startLine && i >= oldEndLine)) {
-                val lineNum = i + 1
-                diffBuilder.appendLine("  $lineNum| ${oldLines[i]}")
-            }
-        }
-
-        // 添加删除的行
-        if (oldEndLine >= startLine) {
-            for (i in (startLine - 1) until oldEndLine) {
+        
+        // 添加删除的行（如果是替换模式）
+        if (!isInsertion) {
+            for (i in editStartIndex..editEndIndex) {
                 val lineNum = i + 1
                 diffBuilder.appendLine("- $lineNum| ${oldLines[i]}")
             }
         }
-
+        
         // 添加新增的行
         val newLinesList = newText.lines()
         for ((index, line) in newLinesList.withIndex()) {
             val lineNum = startLine + index
             diffBuilder.appendLine("+ $lineNum| $line")
         }
-
-        // 添加后续上下文
-        val afterStart = if (oldEndLine >= startLine) oldEndLine else startLine - 1
-        for (i in afterStart until contextEnd) {
-            if (i < oldLines.size) {
-                val lineNum = i + 1
-                diffBuilder.appendLine("  $lineNum| ${oldLines[i]}")
-            }
+        
+        // 添加后续上下文（编辑区域之后的行）
+        val afterEditIndex = if (isInsertion) editStartIndex else editEndIndex + 1
+        for (i in afterEditIndex until contextEndIndex) {
+            val lineNum = i + 1
+            diffBuilder.appendLine("  $lineNum| ${oldLines[i]}")
         }
-
-        if (contextEnd < oldLines.size) {
-            diffBuilder.appendLine("... (省略 ${oldLines.size - contextEnd} 行)")
+        
+        // 添加省略标记（如果需要）
+        if (contextStartIndex > 0) {
+            diffBuilder.insert(0, "... (省略 ${contextStartIndex} 行)\n")
+        }
+        if (contextEndIndex < oldLines.size) {
+            diffBuilder.appendLine("... (省略 ${oldLines.size - contextEndIndex} 行)")
         }
 
         return diffBuilder.toString()

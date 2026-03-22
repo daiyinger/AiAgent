@@ -266,6 +266,15 @@ class EditFileTool : Tool(
         val totalLinesAfter = document.lineCount
         val newEndLine = actualStartLine + newLineCount - 1
 
+        // 生成行号映射信息，帮助用户理解后续编辑的行号变化
+        val lineMapping = generateLineMapping(
+            originalLineCount = lineCount,
+            editStartLine = actualStartLine,
+            editEndLine = actualEndLine,
+            newLineCount = newLineCount,
+            isInsertion = isInsertion
+        )
+
         return ToolResult.Success(
             mapOf(
                 "path" to path,
@@ -280,7 +289,15 @@ class EditFileTool : Tool(
                 "line_change" to lineChange,
                 "is_insertion" to isInsertion,
                 "total_lines" to totalLinesAfter,
-                "new_end_line" to newEndLine
+                "new_end_line" to newEndLine,
+                "line_mapping" to lineMapping,
+                "edited_range" to mapOf(
+                    "start" to actualStartLine,
+                    "end" to newEndLine,
+                    "original_start" to actualStartLine,
+                    "original_end" to actualEndLine
+                ),
+                "warning" to "IMPORTANT: Line numbers have changed! For subsequent edits to lines AFTER this edit, adjust line numbers by $lineChange. Use 'total_lines' and 'new_end_line' from this result to calculate new line numbers."
             )
         )
     }
@@ -358,5 +375,40 @@ class EditFileTool : Tool(
             lineChange < 0 -> "Replaced lines $startLine-$newEndLine (${lineChange} lines). File now has $totalLines lines."
             else -> "Replaced lines $startLine-$newEndLine (no line change). File has $totalLines lines."
         }
+    }
+
+    /**
+     * 生成行号映射信息，帮助用户理解后续编辑时行号的变化
+     */
+    private fun generateLineMapping(
+        originalLineCount: Int,
+        editStartLine: Int,
+        editEndLine: Int,
+        newLineCount: Int,
+        isInsertion: Boolean
+    ): Map<String, Any> {
+        val oldLineCount = if (isInsertion) 0 else editEndLine - editStartLine + 1
+        val lineChange = newLineCount - oldLineCount
+        
+        return mapOf(
+            "original_file_lines" to originalLineCount,
+            "edited_range" to mapOf(
+                "start" to editStartLine,
+                "end" to if (isInsertion) editStartLine - 1 else editEndLine,
+                "line_count_before" to oldLineCount,
+                "line_count_after" to newLineCount
+            ),
+            "line_change" to lineChange,
+            "mapping_rules" to listOf(
+                "Lines BEFORE edit range (1 to ${editStartLine - 1}): unchanged",
+                "Lines IN edit range (${editStartLine} to ${if (isInsertion) editStartLine - 1 else editEndLine}): replaced with $newLineCount lines",
+                "Lines AFTER edit range (${if (isInsertion) editStartLine else editEndLine + 1} to $originalLineCount): shifted by $lineChange lines"
+            ),
+            "example" to if (lineChange != 0) {
+                "If you need to edit line ${editEndLine + 1} from original file, use line ${editEndLine + 1 + lineChange} now"
+            } else {
+                "No line number adjustment needed for lines after the edit"
+            }
+        )
     }
 }
