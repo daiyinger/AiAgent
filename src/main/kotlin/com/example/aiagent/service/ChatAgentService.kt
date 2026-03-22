@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * AI Agent 服务
  * 支持流式响应、Token 优化、智能历史管理
  */
-class LangChainAgentService(private val project: Project) {
+class ChatAgentService(private val project: Project) {
 
     companion object {
         /** 工具调用最大轮数 */

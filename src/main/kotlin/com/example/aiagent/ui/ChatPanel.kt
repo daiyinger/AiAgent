@@ -34,7 +34,7 @@ import com.example.aiagent.service.AiAgentService
 import com.example.aiagent.service.ChatStateService
 import com.example.aiagent.service.ChatStateService.MessageState
 import com.example.aiagent.service.ChatStateService.SessionState
-import com.example.aiagent.service.LangChainAgentService
+import com.example.aiagent.service.ChatAgentService
 import com.example.aiagent.service.toLocalDateTime
 import com.example.aiagent.service.toStateString
 import com.example.aiagent.settings.AiAgentSettings
@@ -189,7 +189,7 @@ fun ChatPanel() {
     val settings = AiAgentSettings.instance.state
     val currentProject = remember { ProjectManager.getInstance().openProjects.firstOrNull() }
     val aiAgentService = remember { AiAgentService() }
-    val langChainService = remember { currentProject?.let { LangChainAgentService(it) } }
+    val chatAgentService = remember { currentProject?.let { ChatAgentService(it) } }
     val chatStateService = remember { ChatStateService.instance }
     
     val sessions = remember { mutableStateOf(chatStateService.sessions.toMutableList()) }
@@ -266,9 +266,9 @@ fun ChatPanel() {
                 IconButton(
                     onClick = {
                         // 停止当前正在进行的AI请求
-                        langChainService?.stopCurrentSession()
+                        chatAgentService?.stopCurrentSession()
                         // 清除消息缓存，避免新会话使用旧缓存
-                        langChainService?.clearCache()
+                        chatAgentService?.clearCache()
                         // 创建新会话
                         val newSession = chatStateService.createNewSession()
                         sessions.value = chatStateService.sessions.toMutableList()
@@ -715,10 +715,10 @@ fun ChatPanel() {
                                 isSending = false
                                 log("用户停止发送消息")
                                 // 停止当前正在进行的AI请求
-                                langChainService?.stopCurrentSession()
+                                chatAgentService?.stopCurrentSession()
                                 // 注意：不要在这里调用 resetCancellation()，因为工具可能还在执行中
                                 // 清除消息缓存，避免新会话使用旧缓存
-                                langChainService?.clearCache()
+                                chatAgentService?.clearCache()
                                 
                                 // 保存当前UI层的消息内容到ChatStateService
                                 log("保存当前消息状态")
@@ -729,7 +729,7 @@ fun ChatPanel() {
                                 }
                             } else if (inputText.trim().isNotEmpty()) {
                                 // 重置取消标志，确保新请求可以正常进行
-                                langChainService?.resetCancellation()
+                                chatAgentService?.resetCancellation()
                                 
                                 val userMessage = UserMessage(
                                     id = System.currentTimeMillis().toString(),
@@ -768,7 +768,7 @@ fun ChatPanel() {
                                 
                                 var tokenUsage: Pair<Int, Int>? = null
                                 
-                                if (langChainService != null) {
+                                if (chatAgentService != null) {
                                     CoroutineScope(Dispatchers.IO).launch {
                                         var currentContent = ""
                                         var currentReasoningContent = ""
@@ -781,11 +781,11 @@ fun ChatPanel() {
                                         messageContents[aiMessageId] = currentContent
                                         reasoningContents[aiMessageId] = currentReasoningContent
                                         
-                                        val result = langChainService.sendMessage(
+                                        val result = chatAgentService.sendMessage(
                                             message = originalInput,
                                             onChunk = { chunk ->
                                                 // 检查是否已取消
-                                                if (langChainService?.isCancelled() == true) {
+                                                if (chatAgentService?.isCancelled() == true) {
                                                     log("已取消，跳过处理 chunk")
                                                     return@sendMessage
                                                 }
@@ -855,7 +855,7 @@ fun ChatPanel() {
                                             },
                                             onReasoningChunk = { chunk ->
                                                 // 检查是否已取消
-                                                if (langChainService?.isCancelled() == true) {
+                                                if (chatAgentService?.isCancelled() == true) {
                                                     log("已取消，跳过处理 reasoning chunk")
                                                     return@sendMessage
                                                 }
