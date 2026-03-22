@@ -1,5 +1,6 @@
 package com.example.aiagent.tools
 
+import com.example.aiagent.service.EditFileLogger
 import com.example.aiagent.service.LogService
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
@@ -177,6 +178,17 @@ class PreviewEditTool : Tool(
 
             // 验证是否可以安全应用
             val canApply = startLine >= 1 && (endLine <= totalLineCount || isInsertion)
+
+            // 记录预览日志
+            EditFileLogger.logPreview(
+                filePath = path,
+                startLine = startLine,
+                endLine = endLine,
+                newText = newText,
+                originalContent = oldText,
+                diff = diff,
+                lineChange = lineChange
+            )
 
             ToolResult.Success(
                 mapOf(

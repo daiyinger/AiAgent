@@ -1,6 +1,7 @@
 package com.example.aiagent.tools
 
 import com.example.aiagent.exceptions.AiAgentException
+import com.example.aiagent.service.EditFileLogger
 import com.example.aiagent.service.LogService
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -221,6 +222,19 @@ class EditFileTool : Tool(
             
             val textToInsert = if (newText.startsWith("\n")) newText else "\n$newText"
             
+            // 记录edit执行前的日志
+            EditFileLogger.logExecution(
+                filePath = path,
+                startLine = startLine,
+                endLine = endLine,
+                newText = newText,
+                originalContent = "(Insertion - no original content)",
+                actualContent = "(Will be inserted)",
+                success = true,
+                lineChange = newText.lines().size,
+                totalLinesAfter = lineCount + newText.lines().size
+            )
+            
             WriteCommandAction.runWriteCommandAction(project) {
                 document.insertString(insertOffset, textToInsert)
                 FileDocumentManager.getInstance().saveDocument(document)
@@ -265,6 +279,19 @@ class EditFileTool : Tool(
         val lineChange = newLineCount - oldLineCount
         val totalLinesAfter = document.lineCount
         val newEndLine = actualStartLine + newLineCount - 1
+
+        // 记录edit执行后的日志
+        EditFileLogger.logExecution(
+            filePath = path,
+            startLine = startLine,
+            endLine = endLine,
+            newText = newText,
+            originalContent = oldText,
+            actualContent = newText,
+            success = true,
+            lineChange = lineChange,
+            totalLinesAfter = totalLinesAfter
+        )
 
         // 生成行号映射信息，帮助用户理解后续编辑的行号变化
         val lineMapping = generateLineMapping(
